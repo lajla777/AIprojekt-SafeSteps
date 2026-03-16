@@ -1,5 +1,4 @@
 import struct
-import csv
 
 with open("dataTestBIN.bin", "rb") as f:
     data = f.read()
@@ -84,3 +83,18 @@ def parse_packet(data):
         pos += 4 + chunk_size
     
     return {'timestamp': timestamp, 'chunks': chunks}
+
+#parsanje
+packets = []
+for i in range(len(positions)):
+    start = positions[i]
+    end = positions[i+1] if i+1 < len(positions) else len(data)
+    packet_data = data[start:end]
+    packet = parse_packet(packet_data)
+    if packet is not None:
+        packets.append(packet)
+
+print(f"uspešno parsiranih paketov: {len(packets)}")
+
+
+
