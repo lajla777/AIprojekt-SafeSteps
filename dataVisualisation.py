@@ -1,6 +1,42 @@
 import numpy as np
-import paket as paketek
 
+class Paket:
+    def __init__(self, id: int, ts: float, data:np.ndarray):
+        self.id = id
+        self.ts = ts
+        self.data = np.array(data)
+
+    def read(self):
+        return self.data
+def crc16_update(crc, data):
+    crc ^= data
+    for i in range(8):
+        if crc & 1:
+            crc = (crc >> 1) ^ 0xA001
+        else:
+            crc = crc >> 1
+    return crc
+
+def crc16_compute(data):
+    crc = 0xFFFF
+    for byte in data:
+        crc = crc16_update(crc, byte)
+    return crc
+
+def unstuff_bytes(data):
+    unstuffed = bytearray()
+    i = 0
+    while i < len(data):
+        if data[i] == 0xFE:
+            i += 1
+            if i >= len(data):
+                break
+            unstuffed.append(0xFE ^ data[i])
+        else:
+            unstuffed.append(data[i])
+        i += 1
+    return bytes(unstuffed)
+    
 TIP_ZLOGA = {
     1: 2, #1=ziroskop 2=pospeskomeer in 3=magnetometer
     2: 2,
