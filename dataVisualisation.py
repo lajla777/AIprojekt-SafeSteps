@@ -100,5 +100,16 @@ def sestavi_podatke(seznam_paketov):
     return fvz, signal
     """
 if __name__ == "__main__":
-    pass
+    with open('data.bin', 'rb') as f:
+        data = f.read()
     
+    #najdi vse pakete v podatkih
+    sync = b'\xFF\xFF'
+    positions = []
+    
+    for i in range(len(data)-1):
+        if data[i:i+2] == sync:
+            positions.append(i)
+
+    #tu dodaj parsing
+
