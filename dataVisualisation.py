@@ -1,3 +1,4 @@
+import struct
 import numpy as np
 
 class Paket:
@@ -8,6 +9,7 @@ class Paket:
 
     def read(self):
         return self.data
+    
 def crc16_update(crc, data):
     crc ^= data
     for i in range(8):
@@ -36,14 +38,46 @@ def unstuff_bytes(data):
             unstuffed.append(data[i])
         i += 1
     return bytes(unstuffed)
+
+def parse_paket(data):
+    if data[0:2] != b'\xFF\xFF':
+        return None
+
+    raw = data[3:]
+    payload = unstuff_bytes(raw)
+
+    if len(payload) < 8:
+        return None
+
+    received_crc = struct.unpack('<H', payload[-2:])[0]
+    computed_crc = crc16_compute(payload[:-2])
+    if received_crc != computed_crc:
+        return None
     
-TIP_ZLOGA = {
-    1: 2, #1=ziroskop 2=pospeskomeer in 3=magnetometer
-    2: 2,
-    3: 2
-}
+    timestamp = struct.unpack('<I', payload[0:4])[0]
+    chunks_data = payload[6:-2]
+
+    pos=0
+    chunks={}
+
+    while pos < len(chunks_data):
+        chunk_id = chunks_data[pos]
+        size = struct.unpack('<H', chunks_data[pos+1:pos+3])[0] + 1
+        chunk_data = chunks_data[pos+4:pos+4+size]
+
+        samples = []
+        for i in range(0, size, 6):
+            if i+6 <= len(chunk_data):
+                x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
+                samples.append((x, y, z))
+
+        chunks[chunk_id] = samples
+        pos += 4 + size
+
+    return {'timestamp': timestamp, 'chunks': chunks}
 
 def sestavi_podatke(seznam_paketov):
+    """
     paket_seznam = []
     st_vz_seznam = []
     matrike = []
@@ -64,7 +98,7 @@ def sestavi_podatke(seznam_paketov):
     signal = np.vstack(matrike)
 
     return fvz, signal
-
+    """
 if __name__ == "__main__":
     pass
     
