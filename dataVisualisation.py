@@ -2,6 +2,10 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 
+GIRO_ID = 1
+ACC_ID = 2
+MAG_ID = 3
+
 class Paket:
     def __init__(self, id, ts, data):
         self.id = id
@@ -75,53 +79,13 @@ def parse_packet(data):
 
     return {'timestamp': timestamp, 'chunks': chunks}
 
-def sestavi_podatke(seznam_paketov):
-    vsi = []
-    T = []
-    N = []
-
-
-    for i, p in enumerate(seznam_paketov):
-        data = np.frombuffer(p.data, dtype=np.int16).reshape(-1, 3)
-        vsi.append(data)
-
-        N.append(data.shape[0])
-        if i > 0:
-            T.append(p.ts - seznam_paketov[i-1].ts)
-
-    signal = np.vstack(vsi)
-    Fvz = np.mean(N) / np.mean(T)
-
-    return Fvz, signal
-
-def prikazi_signal(signal, naslov="", startInd=None, endInd=None):
-    if startInd is None:
-        startInd = 0
-    if endInd is None:
-        endInd = signal.shape[0]
-
-    sig = signal[startInd:endInd]
-
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(sig[:,0], label="X")
-    plt.plot(sig[:,1], label="Y")
-    plt.plot(sig[:,2], label="Z")
-
-    plt.title(naslov)
-    plt.xlabel("vzorec")
-    plt.ylabel("vrednost")
-    plt.legend()
-    plt.grid()
-
-    plt.show()
-
-def signali_skupaj(bin_datoteka):
+def dekodiraj_bin(bin_datoteka):
     with open(bin_datoteka, "rb") as f:
         data = f.read()
 
     sync = b'\xFF\xFF'
     positions = []
+
     for i in range(len(data)-1):
         if data[i:i+2] == sync:
             positions.append(i)
@@ -135,30 +99,98 @@ def signali_skupaj(bin_datoteka):
             raw_packets.append(p)
 
     seznam_paketov = []
+
     for p in raw_packets:
-        ts = p['timestamp'] / 1000.0
+        ts = p['timestamp'] / 1000.0  #iz ms v s
+
         for chunk_id, samples in p['chunks'].items():
             data_bytes = np.array(samples, dtype=np.int16).tobytes()
             seznam_paketov.append(Paket(chunk_id, ts, data_bytes))
 
-    filtriraniGiro = [p for p in seznam_paketov if p.id == 1]
-    filtriraniAcc = [p for p in seznam_paketov if p.id == 2]
-    filtriraniMag = [p for p in seznam_paketov if p.id == 3]
+    return seznam_paketov
 
-    FvzGiro, signalGiro   = sestavi_podatke(filtriraniGiro)
-    FvzAcc, signalAcc  = sestavi_podatke(filtriraniAcc)
-    FvzMag, signalMag    = sestavi_podatke(filtriraniMag)
+def sestavi_podatke(seznam_paketov):
+    vsi = [] #matrike podatkov iz vsakega paketa
+    T = [] #casovnerazlike med paketi
+    N = [] #stevilo vzorcev v vsakem paketu
 
-    signalGiro  = signalGiro  * 8.75e-3
+    for i, p in enumerate(seznam_paketov):
+        if p.id in [1, 2, 3]:
+            bytes_per_sample = 2
+            dtype = np.int16
+        else: 
+            dtype = np.uint8
+            bytes_per_sample = 1
+
+        data = np.frombuffer(p.data, dtype=dtype)
+
+        Nvz = len(data) / 3
+        N.append(Nvz)
+
+        data = data.reshape(-1, 3)
+        vsi.append(data)
+
+        if i > 0:
+            T.append(p.ts - seznam_paketov[i-1].ts)
+
+    signal = np.vstack(vsi)
+
+    if len(T) > 0:
+        Fvz = np.mean(N) / np.mean(T)
+    else:
+        Fvz = 0
+
+    return Fvz, signal
+
+def prikazi_signal(signal, naslov=None, startInd=None, endInd=None):
+    if startInd is None:
+        startInd = 0
+    if endInd is None:
+        endInd = signal.shape[0]
+
+    sig = signal[startInd:endInd]
+    x = np.arange(startInd, endInd)
+
+    plt.figure(figsize=(13, 6))
+
+    plt.plot(x, sig[:,0], label="X", color='#B063F8')
+    plt.plot(x, sig[:,1], label="Y", color="#FC78F3")
+    plt.plot(x, sig[:,2], label="Z", color='#A80354')
+
+    plt.title(naslov)
+    if "Žiroskop" in naslov:
+        plt.ylabel("rotacija (°/s)")
+    elif "Akcelometer" in naslov:
+        plt.ylabel("pospešek (G)")
+    elif "Magnetometer" in naslov:
+        plt.ylabel("magnetno polje (Gauss)")
+    plt.xlabel("vzorec")
+    plt.legend()
+    plt.grid()
+
+    plt.show()
+
+def signali_skupaj(bin_datoteka):
+    vsiPaketi = dekodiraj_bin(bin_datoteka)
+
+    paketiGiro = [p for p in vsiPaketi if p.id == GIRO_ID]
+    paketiAcc = [p for p in vsiPaketi if p.id == ACC_ID]
+    paketiMag = [p for p in vsiPaketi if p.id == MAG_ID]
+
+    FvzGiro, signalGiro = sestavi_podatke(paketiGiro)
+    FvzAcc, signalAcc = sestavi_podatke(paketiAcc)
+    FvzMag, signalMag = sestavi_podatke(paketiMag)
+
+    signalGiro = signalGiro * 8.75e-3
     signalAcc = signalAcc * 6.125e-5
-    signalMag   = signalMag   * 1.5e-3
+    signalMag = signalMag * 1.5e-3
 
     #casovne osi za vsak signal
-    tGiro  = np.arange(len(signalGiro))  / FvzGiro
+    tGiro = np.arange(len(signalGiro)) / FvzGiro
     tAcc = np.arange(len(signalAcc)) / FvzAcc
-    tMag   = np.arange(len(signalMag))   / FvzMag
+    tMag = np.arange(len(signalMag)) / FvzMag
 
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(11, 7))
     plt.suptitle(f"Sensor data from {bin_datoteka}", fontsize=16)
 
     plt.subplot(3,1,1)
@@ -192,69 +224,68 @@ def signali_skupaj(bin_datoteka):
     plt.tight_layout()
     plt.show()
 
-def main():
-    signali_skupaj("LOG011.BIN")  
-    signali_skupaj("dataTestBIN.bin")
-    
-    with open("dataTestBIN.bin", "rb") as f:
-        data = f.read()
-
-    sync = b'\xFF\xFF'
-    positions = []
-
-    for i in range(len(data)-1):
-        if data[i:i+2] == sync:
-            positions.append(i)
-
-    raw_packets = []
-    for i in range(len(positions)):
-        start = positions[i]
-        end = positions[i+1] if i+1 < len(positions) else len(data)
-        p = parse_packet(data[start:end])
-        if p:
-            raw_packets.append(p)
-
-    seznam_paketov = []
-
-    for p in raw_packets:
-        ts = p['timestamp'] / 1000.0  #iz ms v s
-
-        for chunk_id, samples in p['chunks'].items():
-            data_bytes = np.array(samples, dtype=np.int16).tobytes()
-            seznam_paketov.append(Paket(chunk_id, ts, data_bytes))
-    
-    filtriraniGiro = [p for p in seznam_paketov if p.id == 1]
-    FvzGiro, signalGiro = sestavi_podatke(filtriraniGiro)
-    signalGiro = signalGiro * 8.75e-3
-    print(f"Fvz žiroskopa= {FvzGiro:.2f} Hz")
-
-    prikazi_signal(signalGiro, f"Žiroskop - cel signal (Fvz={FvzGiro:.2f} Hz)")
-    prikazi_signal(signalGiro,
-                   "Žiroskop - interval",
-                   10,
-                   int(FvzGiro * 2)+10)
-    
-    filtriraniAcc = [p for p in seznam_paketov if p.id == 2]
-    FvzAcc, signalAcc = sestavi_podatke(filtriraniAcc)
-    signalAcc = signalAcc * 6.125e-5 
-    print(f"Fvz akcelometera = {FvzAcc:.2f} Hz")
-
-    prikazi_signal(signalAcc, f"Akcelometer - cel signal (Fvz={FvzAcc:.2f} Hz)")
-    prikazi_signal(signalAcc,
-                   "Akcelometer - interval",
-                   0,
-                   int(FvzAcc * 2))
-    
-    filtriraniMag = [p for p in seznam_paketov if p.id == 3]
-    FvzMag, signalMag = sestavi_podatke(filtriraniMag)
-    signalMag = signalMag * 1.5e-3
-    print(f"Fvz magnetometra = {FvzMag:.2f} Hz")    
-
-    prikazi_signal(signalMag, f"Magnetometer - cel signal (Fvz={FvzMag:.2f} Hz)")
-    prikazi_signal(signalMag,   
-                   "Magnetometer - interval",
-                   10,
-                   int(FvzMag * 2) + 10)
-
 if __name__ == "__main__":
-    main()
+    print("VIZUALIZACIJA PODATKOV")
+    vsiPaketi = dekodiraj_bin("dataTestBIN.bin")
+
+    while True:
+        print("\nKateri signal želiš prikazati?")
+        print("- vsi signali skupaj (testni): 1")
+        print("- vsi signali skupaj (moji): 2")
+        print("- žiroskop: 3")
+        print("- akcelometer: 4")
+        print("- magnetometer: 5")
+
+        izbira = input("\nIzberi možnost (1-5): ")
+
+        if izbira == "1":
+            signali_skupaj("LOG011.BIN")  
+        elif izbira == "2":
+            signali_skupaj("dataTestBIN.bin")
+            
+        elif izbira == "3" or izbira == "4" or izbira == "5":
+
+            if izbira == "3":
+                paketiGiro = [p for p in vsiPaketi if p.id == GIRO_ID]
+                FvzGiro, signalGiro = sestavi_podatke(paketiGiro)
+                signalGiro = signalGiro * 8.75e-3
+                print(f"Fvz žiroskopa= {FvzGiro:.2f} Hz")
+
+                prikazi_signal(signalGiro, f"Žiroskop (Fvz={FvzGiro:.2f} Hz)")
+                prikazi_signal(signalGiro,
+                            "Žiroskop - interval",
+                            1778,
+                            int(FvzGiro * 3)+1778)
+                #x os = rotacija naprej/nazaj
+                #y os = rotacija levo/desno
+                #z os = rotacija okoli svoje osi
+
+            elif izbira == "4":
+                paketiAcc = [p for p in vsiPaketi if p.id == ACC_ID]
+                FvzAcc, signalAcc = sestavi_podatke(paketiAcc)
+                signalAcc = signalAcc * 6.125e-5 
+                print(f"Fvz akcelometera = {FvzAcc:.2f} Hz")
+
+                prikazi_signal(signalAcc, f"Akcelometer (Fvz={FvzAcc:.2f} Hz)")
+                prikazi_signal(signalAcc,
+                            "Akcelometer - interval",
+                            2366,
+                            int(FvzAcc * 3)+2366)
+                #x os = pospešek naprej/nazaj
+                #y os = pospešek levo/desno
+                #z os = pospešek gor/dol(gravitacija)
+
+            elif izbira == "5":
+                paketiMag = [p for p in vsiPaketi if p.id == MAG_ID]
+                FvzMag, signalMag = sestavi_podatke(paketiMag)
+                signalMag = signalMag * 1.5e-3
+                print(f"Fvz magnetometra = {FvzMag:.2f} Hz")    
+
+                prikazi_signal(signalMag, f"Magnetometer (Fvz={FvzMag:.2f} Hz)")
+                prikazi_signal(signalMag,   
+                            "Magnetometer - interval",
+                            635,
+                            int(FvzMag * 3)+635)
+                #x os = magnetno polje naprej/nazaj
+                #y os = magnetno polje levo/desno
+                #z os = magnetno polje gor/dol
