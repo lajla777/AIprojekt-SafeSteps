@@ -75,21 +75,19 @@ def parse_packet(data):
 
     return {'timestamp': timestamp, 'chunks': chunks}
 
-def sestavi_podatke(seznam_paketov, wanted_id):
+def sestavi_podatke(seznam_paketov):
     vsi = []
     T = []
     N = []
 
-    filtrirani = [p for p in seznam_paketov if p.id == wanted_id]
 
-    for i, p in enumerate(filtrirani):
+    for i, p in enumerate(seznam_paketov):
         data = np.frombuffer(p.data, dtype=np.int16).reshape(-1, 3)
         vsi.append(data)
 
         N.append(data.shape[0])
-
         if i > 0:
-            T.append(p.ts - filtrirani[i-1].ts)
+            T.append(p.ts - seznam_paketov[i-1].ts)
 
     signal = np.vstack(vsi)
     Fvz = np.mean(N) / np.mean(T)
@@ -143,10 +141,13 @@ def signali_skupaj(bin_datoteka):
             data_bytes = np.array(samples, dtype=np.int16).tobytes()
             seznam_paketov.append(Paket(chunk_id, ts, data_bytes))
 
+    filtriraniGiro = [p for p in seznam_paketov if p.id == 1]
+    filtriraniAcc = [p for p in seznam_paketov if p.id == 2]
+    filtriraniMag = [p for p in seznam_paketov if p.id == 3]
 
-    FvzGiro, signalGiro   = sestavi_podatke(seznam_paketov, 1)
-    FvzAcc, signalAcc  = sestavi_podatke(seznam_paketov, 2)
-    FvzMag, signalMag    = sestavi_podatke(seznam_paketov, 3)
+    FvzGiro, signalGiro   = sestavi_podatke(filtriraniGiro)
+    FvzAcc, signalAcc  = sestavi_podatke(filtriraniAcc)
+    FvzMag, signalMag    = sestavi_podatke(filtriraniMag)
 
     signalGiro  = signalGiro  * 8.75e-3
     signalAcc = signalAcc * 6.125e-5
@@ -221,18 +222,20 @@ def main():
         for chunk_id, samples in p['chunks'].items():
             data_bytes = np.array(samples, dtype=np.int16).tobytes()
             seznam_paketov.append(Paket(chunk_id, ts, data_bytes))
-
-    FvzGiro, signalGiro = sestavi_podatke(seznam_paketov, 1)
+    
+    filtriraniGiro = [p for p in seznam_paketov if p.id == 1]
+    FvzGiro, signalGiro = sestavi_podatke(filtriraniGiro)
     signalGiro = signalGiro * 8.75e-3
     print(f"Fvz žiroskopa= {FvzGiro:.2f} Hz")
 
     prikazi_signal(signalGiro, f"Žiroskop - cel signal (Fvz={FvzGiro:.2f} Hz)")
     prikazi_signal(signalGiro,
                    "Žiroskop - interval",
-                   0,
-                   int(FvzGiro * 2))
+                   10,
+                   int(FvzGiro * 2)+10)
     
-    FvzAcc, signalAcc = sestavi_podatke(seznam_paketov, 2)
+    filtriraniAcc = [p for p in seznam_paketov if p.id == 2]
+    FvzAcc, signalAcc = sestavi_podatke(filtriraniAcc)
     signalAcc = signalAcc * 6.125e-5 
     print(f"Fvz akcelometera = {FvzAcc:.2f} Hz")
 
@@ -242,15 +245,16 @@ def main():
                    0,
                    int(FvzAcc * 2))
     
-    FvzMag, signalMag = sestavi_podatke(seznam_paketov, 3)
+    filtriraniMag = [p for p in seznam_paketov if p.id == 3]
+    FvzMag, signalMag = sestavi_podatke(filtriraniMag)
     signalMag = signalMag * 1.5e-3
     print(f"Fvz magnetometra = {FvzMag:.2f} Hz")    
 
     prikazi_signal(signalMag, f"Magnetometer - cel signal (Fvz={FvzMag:.2f} Hz)")
     prikazi_signal(signalMag,   
                    "Magnetometer - interval",
-                   0,
-                   int(FvzMag * 2))
+                   10,
+                   int(FvzMag * 2) + 10)
 
 if __name__ == "__main__":
     main()
