@@ -76,29 +76,26 @@ def parse_paket(data):
 
     return {'timestamp': timestamp, 'chunks': chunks}
 
-def sestavi_podatke(seznam_paketov):
-    """
-    paket_seznam = []
-    st_vz_seznam = []
-    matrike = []
+def sestavi_podatke(seznam_paketov, wanted_id):
+    vsi = []
+    T = []
+    N = []
 
-    for i, paket in enumerate(seznam_paketov):
-        st_vzorcev = paket.data.shape[0]
-        st_vz_seznam.append(st_vzorcev)
-        matrike.append(paket.data)
+    filtrirani = [p for p in seznam_paketov if p.id == wanted_id]
 
-        if i<len(seznam_paketov)-1:
-            dt = seznam_paketov[i+1].ts - paket.ts
-            paket_seznam.append((paket.id, st_vzorcev, dt))
+    for i, p in enumerate(filtrirani):
+        data = np.frombuffer(p.data, dtype=np.int16).reshape(-1, 3)
+        vsi.append(data)
 
-    paket_avg = np.mean(st_vz_seznam)
-    st_vz_avg = np.mean(st_vz_seznam)
-    fvz = st_vz_avg /paket_avg
+        N.append(data.shape[0])
 
-    signal = np.vstack(matrike)
+        if i > 0:
+            T.append(p.ts - filtrirani[i-1].ts)
 
-    return fvz, signal
-    """
+    signal = np.vstack(vsi)
+    Fvz = np.mean(N) / np.mean(T)
+
+    return Fvz, signal
 if __name__ == "__main__":
     with open('data.bin', 'rb') as f:
         data = f.read()
