@@ -2,12 +2,21 @@ import struct
 import serial
 import serial.tools.list_ports
 import sys
-
+import numpy as np
+import time
 # v device maneger preveris in popravis za svoj racunalnik
 SERIAL_PORT = "COM7"
 BAUD_RATE   = 115200
 # za tof se ni navodila ampak mislim da ima 0x05 oznako
 CHUNK_NAMES = {0x01: "gyro", 0x02: "accel", 0x03: "mag", 0x05: "tof"}
+RECORD_MODE = True
+
+class Paket:
+    def __init__(self, id,ts, data, count):
+        self.id = id
+        self.ts = ts
+        self.data = data
+        self.count = count
 
 def crc16_update(crc, data):
     crc ^= data
@@ -60,7 +69,8 @@ def parse_packet(raw):
     
     chunks_data = payload[6:-2]
     pos = 0
-    chunks = {}
+    paketi = []
+
 
     while pos + 4 <= len(chunks_data):
         chunk_id       = chunks_data[pos]
@@ -75,16 +85,25 @@ def parse_packet(raw):
 
 
         samples = []
-        for i in range(0, len(chunk_data) - 5, 6):
-            x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
-            samples.append((x, y, z))
+        if chunk_id == 0x05:  # TOF
+            print(f"  TOF raw ({len(chunk_data)} B): {chunk_data.hex()}")
+            for i in range(0, len(chunk_data), 2):
+                if i + 2 <= len(chunk_data):
+                    dist = struct.unpack('<H', chunk_data[i:i+2])[0]
+                    samples.append((dist,))
+        else:
+            for i in range(0, len(chunk_data) - 5, 6):
+                x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
+                samples.append((x, y, z))
 
-        chunks[chunk_id] = samples
+        paketi.append(Paket(
+            id=chunk_id,
+            ts=timestamp,
+            data=np.array(samples),
+            count=packet_counter
+        ))
 
-        
-        print(f"  chunk {chunk_id} raw bytes: {chunk_data.hex()}")
-
-    return {"timestamp": timestamp, "packet_counter": packet_counter, "chunks": chunks}
+    return paketi
 
 def find_sync(buf, start=0):
     i = start
@@ -93,6 +112,32 @@ def find_sync(buf, start=0):
             return i
         i += 1
     return -1
+
+def read_file(path):
+    with open(path, "rb") as f:
+        buf = bytearray(f.read())
+    
+    all_packets = []
+    
+    while True:
+        s1 = find_sync(buf)
+        if s1 == -1:
+            break
+        if s1 > 0:
+            buf = buf[s1:]
+        
+        s2 = find_sync(buf, 2)
+        if s2 == -1:
+            break
+        
+        raw = bytes(buf[:s2])
+        buf = buf[s2:]
+        
+        pkt = parse_packet(raw)
+        if pkt is not None:
+            all_packets.extend(pkt)
+    
+    return all_packets
 
 def main():
     print(f"Opening {SERIAL_PORT} @ {BAUD_RATE} baud ...")
@@ -106,6 +151,11 @@ def main():
 
     buf = bytearray()
     last_counter = None
+
+    filename = f"stream_{int(time.time())}.bin" if RECORD_MODE else None
+    f = open(filename, "wb") if RECORD_MODE else None
+    if filename:
+        print(f"Recording to {filename} ...")
 
     try:
         while True:
@@ -126,23 +176,27 @@ def main():
                     buf.clear()
                 continue
 
-            raw = bytes(buf[:s2])
+            raw = bytearray(buf[:s2])
             buf = buf[s2:]
 
             while raw and raw[-1] in (0x0a, 0x0d):
                 raw = raw[:-1]
-            
+
             p_idx = raw.find(b'Packet:')
             if p_idx != -1:
                 raw = raw[:p_idx]
 
-            pkt = parse_packet(raw)
+            pkt = parse_packet(bytes(raw))
             if pkt is None:
                 print(f"full raw: {raw.hex()}")
                 continue
 
-            cnt = pkt["packet_counter"]
-            ts  = pkt["timestamp"]
+            # Zapiši v datoteko
+            if f:
+                f.write(bytes(raw))
+
+            cnt = pkt[0].count
+            ts  = pkt[0].ts
 
             lost = ""
             if last_counter is not None:
@@ -152,14 +206,23 @@ def main():
             last_counter = cnt
 
             print(f"\n[#{cnt:3d}] t={ts} ms{lost}")
-            for chunk_id, samples in pkt["chunks"].items():
-                name = CHUNK_NAMES.get(chunk_id, f"chunk_{chunk_id:#04x}")
-                for i, (x, y, z) in enumerate(samples):
-                    print(f"  {name}[{i}]  x={x:6d}  y={y:6d}  z={z:6d}")
+            for paket in pkt:
+                name = CHUNK_NAMES.get(paket.id, f"chunk_{paket.id:#04x}")
+                if paket.id == 0x05:
+                    for i, row in enumerate(paket.data):
+                        print(f"  {name}[{i}] distance={int(row[0])} mm")
+                else:
+                    for i, row in enumerate(paket.data):
+                        x, y, z = row
+                        print(f"  {name}[{i}] x={x} y={y} z={z}")
 
     except KeyboardInterrupt:
         print("\nStopped.")
+        if f:
+            print(f"Saved: {filename}")
     finally:
+        if f:
+            f.close()
         ser.close()
 
 if __name__ == "__main__":
