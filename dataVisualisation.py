@@ -111,7 +111,10 @@ def dekodiraj_bin(bin_datoteka):
         ts = p['timestamp'] / 1000.0  #iz ms v s
 
         for chunk_id, samples in p['chunks'].items():
-            data_bytes = np.array(samples, dtype=np.int16).tobytes()
+            if chunk_id in [GIRO_ID, ACC_ID, MAG_ID]:
+                data_bytes = np.array(samples, dtype=np.int16).tobytes()
+            elif chunk_id == TOF_ID:
+                data_bytes = np.array(samples, dtype=np.uint16).tobytes()
             seznam_paketov.append(Paket(chunk_id, ts, data_bytes))
 
     return seznam_paketov
