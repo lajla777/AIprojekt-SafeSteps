@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 GIRO_ID = 1
 ACC_ID = 2
 MAG_ID = 3
+TOF_ID = 4
 
 class Paket:
     def __init__(self, id, ts, data):
@@ -69,10 +70,16 @@ def parse_packet(data):
         chunk_data = chunks_data[pos+4:pos+4+size]
 
         samples = []
-        for i in range(0, size, 6):
-            if i+6 <= len(chunk_data):
-                x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
-                samples.append((x, y, z))
+        if chunk_id in [0x01, 0x02, 0x03]:
+            for i in range(0, size, 6):
+                if i+6 <= len(chunk_data):
+                    x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
+                    samples.append((x, y, z))
+        elif chunk_id in [0x05]:
+            for i in range(0, len(chunk_data), 2):
+                if i+2 <= len(chunk_data):
+                    distance = struct.unpack('<H', chunk_data[i:i+2])[0]
+                    samples.append(distance)
 
         chunks[chunk_id] = samples
         pos += 4 + size
@@ -226,7 +233,7 @@ def signali_skupaj(bin_datoteka):
 
 if __name__ == "__main__":
     print("VIZUALIZACIJA PODATKOV")
-    vsiPaketi = dekodiraj_bin("dataTestBIN.bin")
+    vsiPaketi = dekodiraj_bin("log10.bin")
 
     while True:
         print("\nKateri signal želiš prikazati?")
@@ -241,7 +248,7 @@ if __name__ == "__main__":
         if izbira == "1":
             signali_skupaj("LOG011.BIN")  
         elif izbira == "2":
-            signali_skupaj("dataTestBIN.bin")
+            signali_skupaj("log10.bin")
             
         elif izbira == "3" or izbira == "4" or izbira == "5":
 
@@ -249,13 +256,13 @@ if __name__ == "__main__":
                 paketiGiro = [p for p in vsiPaketi if p.id == GIRO_ID]
                 FvzGiro, signalGiro = sestavi_podatke(paketiGiro)
                 signalGiro = signalGiro * 8.75e-3
-                print(f"Fvz žiroskopa= {FvzGiro:.2f} Hz")
+                print(f"Fvz iroskopa= {FvzGiro:.2f} Hz")
 
                 prikazi_signal(signalGiro, f"Žiroskop (Fvz={FvzGiro:.2f} Hz)")
                 prikazi_signal(signalGiro,
                             "Žiroskop - interval",
-                            1778,
-                            int(FvzGiro * 3)+1778)
+                            1,
+                            int(FvzGiro * 3)+1)
                 #x os = rotacija naprej/nazaj
                 #y os = rotacija levo/desno
                 #z os = rotacija okoli svoje osi
@@ -269,8 +276,8 @@ if __name__ == "__main__":
                 prikazi_signal(signalAcc, f"Akcelometer (Fvz={FvzAcc:.2f} Hz)")
                 prikazi_signal(signalAcc,
                             "Akcelometer - interval",
-                            2366,
-                            int(FvzAcc * 3)+2366)
+                            1,
+                            int(FvzAcc * 3)+1)
                 #x os = pospešek naprej/nazaj
                 #y os = pospešek levo/desno
                 #z os = pospešek gor/dol(gravitacija)
@@ -284,8 +291,8 @@ if __name__ == "__main__":
                 prikazi_signal(signalMag, f"Magnetometer (Fvz={FvzMag:.2f} Hz)")
                 prikazi_signal(signalMag,   
                             "Magnetometer - interval",
-                            635,
-                            int(FvzMag * 3)+635)
+                            1,
+                            int(FvzMag * 3)+1)
                 #x os = magnetno polje naprej/nazaj
                 #y os = magnetno polje levo/desno
                 #z os = magnetno polje gor/dol
