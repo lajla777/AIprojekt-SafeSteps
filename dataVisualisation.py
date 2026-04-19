@@ -116,25 +116,30 @@ def dekodiraj_bin(bin_datoteka):
 
     return seznam_paketov
 
-def sestavi_podatke(seznam_paketov):
+def sestavi_podatke(seznam_paketov, tofSenzor=False):
     vsi = [] #matrike podatkov iz vsakega paketa
     T = [] #casovnerazlike med paketi
     N = [] #stevilo vzorcev v vsakem paketu
 
     for i, p in enumerate(seznam_paketov):
         if p.id in [1, 2, 3]:
-            bytes_per_sample = 2
-            dtype = np.int16
+            #bytes_per_sample = 2
+            #dtype = np.int16
+            data = np.frombuffer(p.data, dtype=np.int16)
+        elif tofSenzor:
+            data = np.frombuffer(p.data, dtype=np.uint16)
         else: 
-            dtype = np.uint8
-            bytes_per_sample = 1
+            #dtype = np.uint8
+            #bytes_per_sample = 1
+            data = np.frombuffer(p.data, dtype=np.uint8)
 
-        data = np.frombuffer(p.data, dtype=dtype)
+        #data = np.frombuffer(p.data, dtype=dtype)
 
-        Nvz = len(data) / 3
+        Nvz = len(data) if tofSenzor else len(data) // 3
         N.append(Nvz)
 
-        data = data.reshape(-1, 3)
+        if not tofSenzor:
+            data = data.reshape(-1, 3)
         vsi.append(data)
 
         if i > 0:
