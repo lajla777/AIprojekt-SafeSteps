@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 GIRO_ID = 1
 ACC_ID = 2
 MAG_ID = 3
-TOF_ID = 4
+TOF_ID = 5
 
 class Paket:
     def __init__(self, id, ts, data):
@@ -148,7 +148,7 @@ def sestavi_podatke(seznam_paketov, tofSenzor=False):
         if i > 0:
             T.append(p.ts - seznam_paketov[i-1].ts)
 
-    signal = np.vstack(vsi)
+    signal = np.concatenate(vsi) if tofSenzor else np.vstack(vsi)
 
     if len(T) > 0:
         Fvz = np.mean(N) / np.mean(T)
@@ -183,6 +183,20 @@ def prikazi_signal(signal, naslov=None, startInd=None, endInd=None):
     plt.legend()
     plt.grid()
 
+    plt.show()
+
+def prikazi_tofSignal(sigTof, FvzTof):
+    timeTof = np.arange(len(sigTof)) / FvzTof
+    masked = np.where(sigTof == 0xFFFF, np.nan, sigTof)
+
+    plt.figure(figsize=(13, 6))
+    plt.plot(timeTof, masked, label="TOF", color='#B063F8')
+    plt.title(f"TOF Senzor (Fvz={FvzTof:.2f} Hz)")
+    plt.xlabel("čas (s)")
+    plt.ylabel("razdalja (mm)")
+    plt.ylim(0, 8200)
+    plt.legend()
+    plt.grid()
     plt.show()
 
 def signali_skupaj(bin_datoteka):
@@ -250,8 +264,9 @@ if __name__ == "__main__":
         print("- žiroskop: 3")
         print("- akcelometer: 4")
         print("- magnetometer: 5")
+        print("- ToF senzor: 6")
 
-        izbira = input("\nIzberi možnost (1-5): ")
+        izbira = input("\nIzberi možnost (1-6): ")
 
         if izbira == "1":
             signali_skupaj("LOG011.BIN")  
@@ -304,3 +319,8 @@ if __name__ == "__main__":
                 #x os = magnetno polje naprej/nazaj
                 #y os = magnetno polje levo/desno
                 #z os = magnetno polje gor/dol
+        elif izbira == "6":
+                paketiTof = [p for p in vsiPaketi if p.id == TOF_ID]
+                FvzTof, signalTof = sestavi_podatke(paketiTof, tofSenzor=True)
+                print(f"Fvz TOF senzorja = {FvzTof:.2f} Hz")    
+                prikazi_tofSignal(signalTof, FvzTof)
