@@ -35,12 +35,14 @@ CHUNK_NAMES = {
     0x01: 'gyroscope',
     0x02: 'accelerometer',
     0x03: 'magnetometer',
+    0x05: 'ToF sensor'
 }
 
 CHUNK_UNITS = {
     0x01: 'mdps',
     0x02: 'mg',
     0x03: 'mGauss',
+    0x05: 'mm',
 }
 
 def parse_packet(data, packet_counter):
@@ -80,11 +82,18 @@ def parse_packet(data, packet_counter):
         chunk_data = chunks_data[pos+4:pos+4+chunk_size]
 
         samples = []
-        for i in range(0, chunk_size, 6):
-            if i + 6 > len(chunk_data):
-                break
-            x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
-            samples.append((x, y, z))
+        if chunk_id == 0x05: 
+            for i in range(0, chunk_size, 2):
+                if i + 2 > len(chunk_data):
+                    break
+                distance = struct.unpack('<H', chunk_data[i:i+2])[0]
+                samples.append((distance,))
+        else:
+            for i in range(0, chunk_size, 6):
+                if i + 6 > len(chunk_data):
+                    break
+                x, y, z = struct.unpack('<hhh', chunk_data[i:i+6])
+                samples.append((x, y, z))
 
         name = CHUNK_NAMES.get(chunk_id, f'unknown_0x{chunk_id:02X}')
         unit = CHUNK_UNITS.get(chunk_id, '?')
@@ -151,7 +160,10 @@ def save_to_txt(packets: list, output_path: str):
                 n = len(chunk['samples'])
                 f.write(f"  {chunk['name']:15s} ({n} vzorcev, {chunk['unit']}):\n")
                 for s in chunk['samples']:
-                    f.write(f"    x={s[0]:7d}  y={s[1]:7d}  z={s[2]:7d}\n")
+                    if len(s) ==1:
+                        f.write(f"distance={s[0]:7d} {chunk['unit']}\n")
+                    else:
+                        f.write(f"x={s[0]:7d}  y={s[1]:7d}  z={s[2]:7d}\n")
 
             prev_counter = c
 
@@ -162,6 +174,7 @@ def save_to_npz(packets: list, output_path: str):
     gyro_data, gyro_ts = [], []
     acc_data,  acc_ts  = [], []
     mag_data,  mag_ts  = [], []
+    tof_data,  tof_ts  = [], []
 
     for pkt in packets:
         ts = pkt['timestamp_ms'] 
@@ -181,6 +194,11 @@ def save_to_npz(packets: list, output_path: str):
                 mag_data.append(s)
                 mag_ts.append(ts)
 
+        if 0x05 in pkt['chunks']:
+            for s in pkt['chunks'][0x05]['samples']:
+                tof_data.append(s[0])
+                tof_ts.append(ts)
+
     np.savez(output_path,
         y_gyro = np.array(gyro_data, dtype=np.int16),
         t_gyro = np.array(gyro_ts,   dtype=np.uint32),
@@ -188,11 +206,14 @@ def save_to_npz(packets: list, output_path: str):
         t_acc  = np.array(acc_ts,    dtype=np.uint32),
         y_mag  = np.array(mag_data,  dtype=np.int16),
         t_mag  = np.array(mag_ts,    dtype=np.uint32),
+        y_tof  = np.array(tof_data,  dtype=np.uint16),
+        t_tof  = np.array(tof_ts,    dtype=np.uint32)
     )
     print(f"Shranjeno v: {output_path}")
 
 
 if __name__ == "__main__":
-    packets = decodeSpo('test.bin')
+    fn = 'test.bin'
+    packets = decodeSpo(fn)
     save_to_txt(packets, 'output.txt')
     save_to_npz(packets, 'output.npz')
