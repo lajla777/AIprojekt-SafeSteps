@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 
-#transformacije
+#transforMACIJE
 train_transform = transforms.Compose([
     transforms.RandomResize((224,224)),
     transforms.RandomHorizontalFlip(),
@@ -37,8 +37,15 @@ class_names = train_dataset.classes
 model = models.mobilenet_v2(weight='IMAGENET1K_V1')
 
 #tu se za optimizacijo
+optimizer = optim.SAdam([
+    {'params': model.features[-7:].parameters(), 'lr': 0.001},
+    {'params': model.classifier.parameters(), 'lr': 0.001}
+])
 
 #TRAINING AND VALIDATION
+def epoch_run(): pass
+#model.train() in model.eval() !!!
+#ali eno ali drugo odvisno od optimizerja
 
 #mogoc se grafi da se vidi ucenje oz kk je natancen model, kaka je izguba
 
