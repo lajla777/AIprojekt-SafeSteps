@@ -111,80 +111,108 @@ def prikazi_signal(signal: np.ndarray,
         plt.tight_layout()
         plt.show()
 
-
-if __name__ == "__main__":
- 
-    # ── Nastavi vhod ──────────────────────────
-    # Za eno datoteko:
-    files = ['test.bin']
- 
-    # Za več datotek (odkomentiraj):
-    # files = ['Zajemanje podatkov/Oseba na prostem/LOG%03i.BIN' % i for i in range(1, 25)]
- 
+def signali_skupaj(seznam: list, naslov: str = ''):
+    """Nariše vse razpoložljive senzorje v eni figuri."""
     SENSOR_IDS = [0x01, 0x02, 0x03, 0x05]
  
-    for file in files:
-        print(f"\n{'='*50}")
-        print(f"Datoteka: {file}")
+    data = {}
+    for sid in SENSOR_IDS:
+        try:
+            Fvz, matrika = sestavi_podatke(seznam, sid)
+            data[sid] = (Fvz, matrika)
+        except ValueError:
+            pass
  
-        packets = decode_file(file)
-        seznam  = v_pakete(packets)
+    if not data:
+        print("Ni podatkov za prikaz.")
+        return
  
-        # Sestavi podatke za vse senzorje
-        data = {}
-        for sid in SENSOR_IDS:
-            try:
-                Fvz, matrika = sestavi_podatke(seznam, sid)
-                data[sid] = (Fvz, matrika)
-                print(f"  {SENSOR_NAMES[sid]:15s}: Fvz={Fvz:.1f} Hz,  vzorcev={len(matrika)}")
-            except ValueError as e:
-                print(f"  {SENSOR_NAMES.get(sid, hex(sid)):15s}: preskočen — {e}")
+    razpolozljivi = list(data.keys())
+    n = len(razpolozljivi)
  
-        if not data:
-            print("  Ni podatkov za prikaz.")
+    fig, axes = plt.subplots(n, 1, figsize=(12, 4*n), sharex=False)
+    if n == 1:
+        axes = [axes]
+    fig.suptitle(f'Vsi senzorji — {naslov}', fontsize=13, y=0.98)
+ 
+    for i, sid in enumerate(razpolozljivi):
+        Fvz, matrika = data[sid]
+        if len(matrika) == 0:
+            axes[i].text(0.5, 0.5, 'Ni podatkov',
+                         ha='center', va='center', transform=axes[i].transAxes)
+            axes[i].set_title(SENSOR_NAMES[sid])
             continue
+        prikazi_signal(matrika,
+                       Fvz=Fvz,
+                       naslov=SENSOR_NAMES[sid],
+                       y_label=Y_LABELS.get(sid, 'vrednost'),
+                       ax=axes[i])
  
-        razpolozljivi = list(data.keys())
-        n = len(razpolozljivi)
+    axes[-1].set_xlabel('Čas [s]', fontsize=10)
+    fig.subplots_adjust(hspace=0.6, top=0.93, bottom=0.06)
+    plt.show()
+
+if __name__ == "__main__":
+    print("VIZUALIZACIJA PODATKOV")
  
-        # ── Graf 1: celoten signal ─────────────
-        fig1, axes1 = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
-        if n == 1:
-            axes1 = [axes1]
-        fig1.suptitle(f'Vsi senzorji — {file}', fontsize=13, y=0.98)
+    ime_datoteke = input("Ime .bin datoteke: ").strip()
+    packets = decode_file(ime_datoteke)
+    seznam  = v_pakete(packets)
  
-        for i, sid in enumerate(razpolozljivi):
+    # Pripravi vse senzorje vnaprej
+    data = {}
+    for sid in [0x01, 0x02, 0x03, 0x05]:
+        try:
+            Fvz, matrika = sestavi_podatke(seznam, sid)
+            data[sid] = (Fvz, matrika)
+            print(f"  {SENSOR_NAMES[sid]:15s}: Fvz={Fvz:.1f} Hz,  vzorcev={len(matrika)}")
+        except ValueError as e:
+            print(f"  {SENSOR_NAMES.get(sid, hex(sid)):15s}: preskočen — {e}")
+ 
+    MENI = {
+        '1': 'Vsi senzorji skupaj',
+        '2': 'Gyroscope',
+        '3': 'Accelerometer',
+        '4': 'Magnetometer',
+        '5': 'ToF senzor',
+        '0': 'Izhod',
+    }
+    SID_MAP = {'2': 0x01, '3': 0x02, '4': 0x03, '5': 0x05}
+ 
+    while True:
+        print("\nKateri signal želiš prikazati?")
+        for k, v in MENI.items():
+            print(f"  {k}: {v}")
+ 
+        izbira = input("Izberi možnost: ").strip()
+ 
+        if izbira == '0':
+            break
+ 
+        elif izbira == '1':
+            signali_skupaj(seznam, naslov=ime_datoteke)
+ 
+        elif izbira in SID_MAP:
+            sid = SID_MAP[izbira]
+            if sid not in data:
+                print(f"Ni podatkov za {SENSOR_NAMES[sid]}.")
+                continue
+ 
             Fvz, matrika = data[sid]
+ 
+            # Celoten signal
             prikazi_signal(matrika,
                            Fvz=Fvz,
                            naslov=SENSOR_NAMES[sid],
-                           y_label=Y_LABELS.get(sid, 'vrednost'),
-                           ax=axes1[i])
+                           y_label=Y_LABELS[sid])
  
-        axes1[-1].set_xlabel('Čas [s]', fontsize=10)
-        fig1.subplots_adjust(hspace=0.5, top=0.93, bottom=0.06)
-        plt.show()
- 
-        # ── Graf 2: odsek (npr. 2–4 s) ────────
-        a, b = 2.0, 4.0
-        fig2, axes2 = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
-        if n == 1:
-            axes2 = [axes2]
-        fig2.suptitle(f'Odsek {a}–{b} s — {file}', fontsize=13, y=0.98)
- 
-        for i, sid in enumerate(razpolozljivi):
-            Fvz, matrika = data[sid]
-            start_idx = int(a * Fvz)
-            end_idx   = min(int(b * Fvz), len(matrika))
+            # Odsek 0–3 s
             prikazi_signal(matrika,
                            Fvz=Fvz,
-                           naslov=SENSOR_NAMES[sid],
-                           y_label=Y_LABELS.get(sid, 'vrednost'),
-                           startInd=start_idx,
-                           endInd=end_idx,
-                           ax=axes2[i])
+                           naslov=f"{SENSOR_NAMES[sid]} — odsek 0–3 s",
+                           y_label=Y_LABELS[sid],
+                           startInd=0,
+                           endInd=int(Fvz * 3))
  
-        axes2[-1].set_xlabel('Čas [s]', fontsize=10)
-        fig2.subplots_adjust(hspace=0.5, top=0.93, bottom=0.06)
-        plt.show()
- 
+        else:
+            print("Neveljavna izbira.")
