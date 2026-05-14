@@ -300,42 +300,42 @@ class LabelTool:
         self.redraw()
         print("Deleted segment")
 
-        def save(self):
-            tof_matrix = self.signals[self.names[0]]
-            tof_fvz    = self.fvz_map[self.names[0]]
-            primary    = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
+    def save(self):
+        tof_matrix = self.signals[self.names[0]]
+        tof_fvz    = self.fvz_map[self.names[0]]
+        primary    = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
 
-            clean = []
-            for s in self.segments:
-                seg_tof = tof_matrix[s["start"]:s["end"] + 1]
-                angle_distance = None
+        clean = []
+        for s in self.segments:
+            seg_tof = tof_matrix[s["start"]:s["end"] + 1]
+            angle_distance = None
 
-                if self.yaw is not None:
-                    pairs = pair_angle_distance(
-                        self.yaw, seg_tof,
-                        gyro_fvz=self.gyro_fvz,
-                        tof_fvz=tof_fvz
-                    )
-                    angle_distance = [
-                        [None if np.isnan(a) else round(a, 4),
-                        None if np.isnan(d) else round(d, 2)]
-                        for a, d in pairs
-                    ]
+            if self.yaw is not None:
+                pairs = pair_angle_distance(
+                    self.yaw, seg_tof,
+                    gyro_fvz=self.gyro_fvz,
+                    tof_fvz=tof_fvz
+                )
+                angle_distance = [
+                    [None if np.isnan(a) else round(a, 4),
+                    None if np.isnan(d) else round(d, 2)]
+                    for a, d in pairs
+                ]
 
-                clean.append({
-                    "start": s["start"],
-                    "end": s["end"],
-                    "start_time": s["start_time"],
-                    "end_time": s["end_time"],
-                    "label": s["label"],
-                    "samples": [
-                        None if np.isnan(v) else v
-                        for v in primary[s["start"]:s["end"] + 1].tolist()
-                    ],
-                    "angle_distance": angle_distance
-                })
+            clean.append({
+                "start": s["start"],
+                "end": s["end"],
+                "start_time": s["start_time"],
+                "end_time": s["end_time"],
+                "label": s["label"],
+                "samples": [
+                    None if np.isnan(v) else v
+                    for v in primary[s["start"]:s["end"] + 1].tolist()
+                ],
+                "angle_distance": angle_distance
+            })
 
-            with open(self.save_path, "w") as f:
-                json.dump(clean, f, indent=2)
+        with open(self.save_path, "w") as f:
+            json.dump(clean, f, indent=2)
 
-            print(f"Saved {len(clean)} segments → {self.save_path}")
+        print(f"Saved {len(clean)} segments → {self.save_path}")
