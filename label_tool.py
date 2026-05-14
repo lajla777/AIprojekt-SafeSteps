@@ -2,7 +2,11 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
+from ahrs.filters import Madgwick
+from scipy.spatial.transform import Rotation as R
+
 from visualisation import prikazi_signal
+from orientation_viewer import OrientationViewer
 
 LABELS = {
     "0": "no_obstacle",
@@ -16,20 +20,131 @@ LABEL_COLORS = {
     "very_close":"red"
 }
 
+def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
+
+    t_src = np.arange(len(arr)) / src_fvz
+    t_dst = np.arange(dst_n)    / dst_fvz
+
+    if arr.ndim == 1:
+        out = np.zeros(dst_n)
+        mask = t_dst <= t_src[-1]
+        out[mask] = np.interp(t_dst[mask], t_src, arr)
+        return out
+
+    out = np.zeros((dst_n, arr.shape[1]))
+    mask = t_dst <= t_src[-1]
+    for ch in range(arr.shape[1]):
+        out[mask, ch] = np.interp(t_dst[mask], t_src, arr[:, ch])
+    return out
+
+
+
+def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
+    gyro_rad = np.deg2rad(gyro)
+    N        = len(gyro_rad)
+
+    if abs(accel_fvz - gyro_fvz) > 0.5 or len(accel) != N:
+        accel = _resample_to_rate(accel, accel_fvz, gyro_fvz, N)
+    if abs(mag_fvz - gyro_fvz) > 0.5 or len(mag) != N:
+        mag   = _resample_to_rate(mag,   mag_fvz,   gyro_fvz, N)
+
+    filter_ = Madgwick(frequency=gyro_fvz)
+
+    Q    = np.zeros((N, 4))
+    Q[0] = [1.0, 0.0, 0.0, 0.0]
+
+    for t in range(1, N):
+        Q[t] = filter_.updateMARG(
+            Q[t - 1],
+            gyr=gyro_rad[t],
+            acc=accel[t],
+            mag=mag[t]
+        )
+
+    yaw   = np.zeros(N)
+    pitch = np.zeros(N)
+    roll  = np.zeros(N)
+
+    for i, q in enumerate(Q):
+        w, x, y, z = q
+        r = R.from_quat([x, y, z, w])
+        roll[i], pitch[i], yaw[i] = r.as_euler('xyz', degrees=True)
+
+    return yaw, pitch, roll
+
+
+def pair_angle_distance(yaw, tof_matrix, gyro_fvz, tof_fvz):
+
+    N_tof = len(tof_matrix)
+    N_yaw = len(yaw)
+
+    t_yaw = np.arange(N_yaw) / gyro_fvz
+    t_tof = np.arange(N_tof) / tof_fvz
+
+    t_max = min(t_yaw[-1], t_tof[-1])
+    mask  = t_tof <= t_max
+
+    yaw_resampled = np.interp(t_tof[mask], t_yaw, yaw)
+
+    if tof_matrix.ndim == 1:
+        distances = tof_matrix[mask]
+    else:
+        distances = np.nanmin(tof_matrix[mask], axis=1)
+
+    return list(zip(yaw_resampled.tolist(), distances.tolist()))
+
+
 class LabelTool:
-    def __init__(self, signals: dict, save_path):
+    def __init__(self, signals: dict, save_path, imu_signals: dict = None):
         self.signals = {}
         self.fvz_map = {}
         for name, (arr, fvz) in signals.items():
             self.signals[name] = arr
             self.fvz_map[name] = fvz
 
-        self.names     = list(signals.keys())
-        self.Fvz       = self.fvz_map[self.names[0]]
+        self.names = list(signals.keys())
+        self.Fvz = self.fvz_map[self.names[0]]
         self.save_path = save_path
 
         tof_samples = len(self.signals[self.names[0]])
         self.tof_duration = tof_samples / self.Fvz
+
+        self.yaw = None
+        self.pitch = None
+        self.roll = None
+        self.gyro_fvz = None
+        self.viewer = None
+
+        if imu_signals and all(k in imu_signals for k in ("gyro", "accel", "mag")):
+            gyro,  self.gyro_fvz = imu_signals["gyro"]
+            accel, accel_fvz = imu_signals["accel"]
+            mag,   mag_fvz = imu_signals["mag"]
+
+            print(f"IMU durations  — "
+                  f"gyro: {len(gyro)/self.gyro_fvz:.2f}s  "
+                  f"accel: {len(accel)/accel_fvz:.2f}s  "
+                  f"mag: {len(mag)/mag_fvz:.2f}s")
+            print(f"ToF duration   — {self.tof_duration:.2f}s")
+
+            print("Computing orientation (Madgwick)…")
+            self.yaw, self.pitch, self.roll = orientation(
+                gyro, accel, mag,
+                gyro_fvz=self.gyro_fvz,
+                accel_fvz=accel_fvz,
+                mag_fvz=mag_fvz,
+            )
+            print(f"Orientation: {len(self.yaw)} samples @ {self.gyro_fvz:.1f} Hz  "
+                  f"({len(self.yaw)/self.gyro_fvz:.2f}s)")
+
+            self.viewer = OrientationViewer(
+                yaw = self.yaw,
+                pitch = self.pitch,
+                roll = self.roll,
+                tof_fvz = self.Fvz,
+                gyro_fvz = self.gyro_fvz,
+                tof_total_duration = self.tof_duration,
+            )
+
 
         n = len(self.names)
         self.fig, self.axes = plt.subplots(
@@ -101,9 +216,9 @@ class LabelTool:
 
         if event.key == "m":
             self.select_mode = not self.select_mode
-            self.selected    = None
-            self.start       = None
-            self.end         = None
+            self.selected = None
+            self.start = None
+            self.end = None
             print(f"{'Entered' if self.select_mode else 'Exited'} select mode")
             self.redraw()
             return
@@ -144,7 +259,7 @@ class LabelTool:
                 self.end   = None
 
     def draw_segment(self, seg):
-        color       = LABEL_COLORS[seg["label"]]
+        color = LABEL_COLORS[seg["label"]]
         is_selected = (seg is self.selected)
         seg["span"] = []; seg["start_line"] = []; seg["end_line"] = []
         s_time = seg["start"] / self.Fvz
@@ -185,24 +300,42 @@ class LabelTool:
         self.redraw()
         print("Deleted segment")
 
-    def save(self):
-        tof_matrix = self.signals[self.names[0]]
-        primary    = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
-        clean = []
-        for s in self.segments:
-            clean.append({
-                "start": s["start"],
-                "end": s["end"],
-                "start_time": s["start_time"],
-                "end_time": s["end_time"],
-                "label": s["label"],
-                "samples": [
-                    None if np.isnan(v) else v
-                    for v in primary[s["start"]:s["end"] + 1].tolist()
-                ],
-            })
+        def save(self):
+            tof_matrix = self.signals[self.names[0]]
+            tof_fvz    = self.fvz_map[self.names[0]]
+            primary    = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
 
-        with open(self.save_path, "w") as f:
-            json.dump(clean, f, indent=2)
+            clean = []
+            for s in self.segments:
+                seg_tof = tof_matrix[s["start"]:s["end"] + 1]
+                angle_distance = None
 
-        print(f"Saved {len(clean)} segments → {self.save_path}")
+                if self.yaw is not None:
+                    pairs = pair_angle_distance(
+                        self.yaw, seg_tof,
+                        gyro_fvz=self.gyro_fvz,
+                        tof_fvz=tof_fvz
+                    )
+                    angle_distance = [
+                        [None if np.isnan(a) else round(a, 4),
+                        None if np.isnan(d) else round(d, 2)]
+                        for a, d in pairs
+                    ]
+
+                clean.append({
+                    "start": s["start"],
+                    "end": s["end"],
+                    "start_time": s["start_time"],
+                    "end_time": s["end_time"],
+                    "label": s["label"],
+                    "samples": [
+                        None if np.isnan(v) else v
+                        for v in primary[s["start"]:s["end"] + 1].tolist()
+                    ],
+                    "angle_distance": angle_distance
+                })
+
+            with open(self.save_path, "w") as f:
+                json.dump(clean, f, indent=2)
+
+            print(f"Saved {len(clean)} segments → {self.save_path}")

@@ -73,6 +73,8 @@ if __name__ == "__main__":
     )
 
     signals = {"ToF (mm)": (tof_matrix, Fvz) }
+    imu_signals = {}
+
 
 
     for sid, key, name in [
@@ -84,6 +86,7 @@ if __name__ == "__main__":
             fvz_s, mat = sestavi_podatke(seznam, sid)
 
             signals[name] = (mat, fvz_s)
+            imu_signals[key] = (mat, fvz_s)
 
             print(
                 f"{name}: {len(mat)} samples @ "
@@ -97,6 +100,7 @@ if __name__ == "__main__":
     tool = LabelTool(
         signals,
         save_path,
+        imu_signals=imu_signals
     )
 
     plt.show()
