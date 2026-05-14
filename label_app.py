@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 
 from decode import decode_file
 from visualisation import sestavi_podatke, v_pakete
+from collections import Counter
+
 from label_tool import LabelTool
 
 LABELS_DIR = "labels"
@@ -39,13 +41,63 @@ if __name__ == "__main__":
     print(f"Saving to: {save_path}")
 
     packets = decode_file(bin_path)
-    seznam = v_pakete(packets)
 
-    Fvz, matrix = sestavi_podatke(seznam, 0x05)
-    
+    if not packets:
+        print("Error: No packets could be parsed from the file")
+        sys.exit(1)
+
+    try:
+        seznam = v_pakete(packets)
+
+        Fvz, tof_matrix = sestavi_podatke(seznam, 0x05)
+
+    except ValueError as e:
+        print(f"\nERROR loading sensor data: {e}")
+
+        counts = Counter()
+
+        for p in seznam:
+            counts[p.id] += 1
+
+        print("\nPacket IDs found:")
+        for pid, cnt in sorted(counts.items()):
+            print(f"  ID 0x{pid:02X}: {cnt} packets")
+
+        sys.exit(1)
+
+    tof_duration = len(tof_matrix) / Fvz
+
+    print(
+        f"ToF: {len(tof_matrix)} samples @ "
+        f"{Fvz:.2f} Hz ({tof_duration:.2f}s)"
+    )
+
+    signals = {"ToF (mm)": (tof_matrix, Fvz) }
 
 
-    tool = LabelTool(matrix, Fvz, save_path)
+    for sid, key, name in [
+        (0x01, "gyro", "Gyro (°/s)"),
+        (0x02, "accel", "Accel (g)"),
+        (0x03, "mag", "Mag (Gauss)"),
+    ]:
+        try:
+            fvz_s, mat = sestavi_podatke(seznam, sid)
+
+            signals[name] = (mat, fvz_s)
+
+            print(
+                f"{name}: {len(mat)} samples @ "
+                f"{fvz_s:.2f} Hz "
+                f"({len(mat) / fvz_s:.2f}s)"
+            )
+
+        except ValueError as e:
+            print(f"{name}: not available — {e}")
+
+    tool = LabelTool(
+        signals,
+        save_path,
+    )
 
     plt.show()
 
