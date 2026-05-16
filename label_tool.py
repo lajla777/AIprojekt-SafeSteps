@@ -362,10 +362,10 @@ class LabelTool:
                 "start_time": s["start_time"],
                 "end_time": s["end_time"],
                 "label": s["label"],
-                "samples": [
-                    None if np.isnan(v) else v
-                    for v in primary[s["start"]:s["end"] + 1].tolist()
-                ],
+                # "samples": [
+                #     None if np.isnan(v) else v
+                #     for v in primary[s["start"]:s["end"] + 1].tolist()
+                # ],
                 "angle_distance": angle_distance
             })
 
