@@ -7,7 +7,8 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial.transform import Rotation as R
 
 class OrientationViewer:
-    def __init__(self, yaw, pitch, roll, tof_fvz, gyro_fvz, tof_total_duration):
+    def __init__(self,Q, yaw, pitch, roll, tof_fvz, gyro_fvz, tof_total_duration):
+        self.Q = Q
         self.yaw = yaw
         self.pitch = pitch
         self.roll = roll
@@ -66,9 +67,10 @@ class OrientationViewer:
         ax.title.set_color("#e0e0ff")
 
     def _dead_reckon(self):
+        dt = 1.0 / self.gyro_fvz
         heading = np.deg2rad(self.yaw)
-        x = np.cumsum(np.cos(heading))
-        y = np.cumsum(np.sin(heading))
+        x = np.cumsum(np.cos(heading) * dt)
+        y = np.cumsum(np.sin(heading) * dt)
         return x, y
 
 
@@ -233,45 +235,33 @@ class OrientationViewer:
 
 
     def update(self, tof_sample_index):
-
         t_click = tof_sample_index / self.tof_fvz
-
         i = int(t_click * self.gyro_fvz)
         i = max(0, min(i, self.N - 1))
 
         self.cursor_line.set_xdata([t_click, t_click])
 
-        rot = R.from_euler(
-            'xyz',
-            [self.roll[i], self.pitch[i], self.yaw[i]],
-            degrees=True
-        )
+        q = self.Q[i]  
+        rot = R.from_quat([q[1], q[2], q[3], q[0]])  
 
         for artist in self.cube_artists:
             artist.remove()
-
         self.cube_artists = self._draw_cube(rot)
 
         self.ax_3d.set_xlim(-1.5, 1.5)
         self.ax_3d.set_ylim(-1.5, 1.5)
         self.ax_3d.set_zlim(-1.5, 1.5)
 
-        self.path_dot.set_data(
-            [self.path_x[i]],
-            [self.path_y[i]]
-        )
+        self.path_dot.set_data([self.path_x[i]], [self.path_y[i]])
 
         tail_start = max(0, i - 200)
-
         self.path_tail.set_data(
             self.path_x[tail_start:i + 1],
             self.path_y[tail_start:i + 1]
         )
 
-        current_time = tof_sample_index / self.tof_fvz
-
         if hasattr(self, "slider"):
-            if abs(self.slider.val - current_time) > 1e-3:
-                self.slider.set_val(current_time)
+            if abs(self.slider.val - t_click) > 1e-3:
+                self.slider.set_val(t_click)
 
         self.fig.canvas.draw_idle()

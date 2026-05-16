@@ -2,7 +2,6 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ahrs.filters import Madgwick
 from scipy.spatial.transform import Rotation as R
 
 from visualisation import prikazi_signal
@@ -17,11 +16,10 @@ LABELS = {
 LABEL_COLORS = {
     "no_obstacle": "blue",
     "obstacle": "orange",
-    "very_close":"red"
+    "very_close": "red"
 }
 
 def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
-
     t_src = np.arange(len(arr)) / src_fvz
     t_dst = np.arange(dst_n)    / dst_fvz
 
@@ -38,19 +36,44 @@ def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
     return out
 
 
+def calibrate_mag(mag):
+    offset = (mag.max(axis=0) + mag.min(axis=0)) / 2.0
+    mag_centered = mag - offset
+
+    ranges = (mag.max(axis=0) - mag.min(axis=0)) / 2.0
+    avg_range = ranges.mean()
+    scale = avg_range / ranges
+    scale = np.clip(scale, 0.1, 5.0)  
+
+    mag_cal = mag_centered * scale
+    print(f"Mag hard-iron offset — X:{offset[0]:.3f}  Y:{offset[1]:.3f}  Z:{offset[2]:.3f}")
+    print(f"Mag soft-iron scale  — X:{scale[0]:.3f}  Y:{scale[1]:.3f}  Z:{scale[2]:.3f}")
+    print(f"Mag cal range — X:{mag_cal[:,0].max()-mag_cal[:,0].min():.3f}  "
+          f"Y:{mag_cal[:,1].max()-mag_cal[:,1].min():.3f}  "
+          f"Z:{mag_cal[:,2].max()-mag_cal[:,2].min():.3f}")
+    return mag_cal
+
+
+from ahrs.filters import Madgwick
 
 def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
-    gyro_rad = np.deg2rad(gyro)
-    N        = len(gyro_rad)
+    gyro_raw = gyro.copy()
+    N = len(gyro_raw)
+    dt = 1.0 / gyro_fvz
 
     if abs(accel_fvz - gyro_fvz) > 0.5 or len(accel) != N:
         accel = _resample_to_rate(accel, accel_fvz, gyro_fvz, N)
     if abs(mag_fvz - gyro_fvz) > 0.5 or len(mag) != N:
-        mag   = _resample_to_rate(mag,   mag_fvz,   gyro_fvz, N)
+        mag = _resample_to_rate(mag, mag_fvz, gyro_fvz, N)
 
-    filter_ = Madgwick(frequency=gyro_fvz)
+    bias_samples = int(gyro_fvz * 1.0)
+    gyro_bias = gyro_raw[:bias_samples].mean(axis=0)
+    gyro_debiased = gyro_raw - gyro_bias
+    gyro_rad = np.deg2rad(gyro_debiased)
+    print(f"Gyro bias — X:{gyro_bias[0]:.3f}  Y:{gyro_bias[1]:.3f}  Z:{gyro_bias[2]:.3f} °/s")
 
-    Q    = np.zeros((N, 4))
+    filter_ = Madgwick(frequency=gyro_fvz, beta=0.02)
+    Q = np.zeros((N, 4))
     Q[0] = [1.0, 0.0, 0.0, 0.0]
 
     for t in range(1, N):
@@ -61,17 +84,25 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
             mag=mag[t]
         )
 
-    yaw   = np.zeros(N)
-    pitch = np.zeros(N)
-    roll  = np.zeros(N)
+    q0 = Q[0]
+    r0_inv = R.from_quat([q0[1], q0[2], q0[3], q0[0]]).inv()
 
-    for i, q in enumerate(Q):
-        w, x, y, z = q
-        r = R.from_quat([x, y, z, w])
-        roll[i], pitch[i], yaw[i] = r.as_euler('xyz', degrees=True)
+    for i in range(N):
+        qi = Q[i]
+        ri = R.from_quat([qi[1], qi[2], qi[3], qi[0]])
+        r_zeroed = r0_inv * ri
+        q_new = r_zeroed.as_quat()  
+        Q[i] = [q_new[3], q_new[0], q_new[1], q_new[2]]  
 
-    return yaw, pitch, roll
+    rots = R.from_quat(Q[:, [1, 2, 3, 0]])
+    euler = rots.as_euler('ZYX', degrees=True)
+    yaw   = euler[:, 0]
+    pitch = euler[:, 1]
+    roll  = euler[:, 2]
 
+    print(f"Yaw range — min:{yaw.min():.1f}°  max:{yaw.max():.1f}°  span:{yaw.max()-yaw.min():.1f}°")
+
+    return Q, yaw, pitch, roll
 
 def pair_angle_distance(yaw, tof_matrix, gyro_fvz, tof_fvz):
 
@@ -93,7 +124,6 @@ def pair_angle_distance(yaw, tof_matrix, gyro_fvz, tof_fvz):
 
     return list(zip(yaw_resampled.tolist(), distances.tolist()))
 
-
 class LabelTool:
     def __init__(self, signals: dict, save_path, imu_signals: dict = None):
         self.signals = {}
@@ -109,6 +139,7 @@ class LabelTool:
         tof_samples = len(self.signals[self.names[0]])
         self.tof_duration = tof_samples / self.Fvz
 
+        self.Q = None
         self.yaw = None
         self.pitch = None
         self.roll = None
@@ -116,35 +147,39 @@ class LabelTool:
         self.viewer = None
 
         if imu_signals and all(k in imu_signals for k in ("gyro", "accel", "mag")):
-            gyro,  self.gyro_fvz = imu_signals["gyro"]
+            gyro, self.gyro_fvz = imu_signals["gyro"]
             accel, accel_fvz = imu_signals["accel"]
-            mag,   mag_fvz = imu_signals["mag"]
+            mag, mag_fvz = imu_signals["mag"]
+
+            mag_cal = calibrate_mag(mag)
 
             print(f"IMU durations  — "
                   f"gyro: {len(gyro)/self.gyro_fvz:.2f}s  "
                   f"accel: {len(accel)/accel_fvz:.2f}s  "
                   f"mag: {len(mag)/mag_fvz:.2f}s")
             print(f"ToF duration   — {self.tof_duration:.2f}s")
+            print("Computing orientation…")
+            mag_cal = calibrate_mag(mag)
 
-            print("Computing orientation (Madgwick)…")
-            self.yaw, self.pitch, self.roll = orientation(
-                gyro, accel, mag,
+            self.Q, self.yaw, self.pitch, self.roll = orientation(
+                gyro, accel, mag_cal,
                 gyro_fvz=self.gyro_fvz,
                 accel_fvz=accel_fvz,
                 mag_fvz=mag_fvz,
             )
+
             print(f"Orientation: {len(self.yaw)} samples @ {self.gyro_fvz:.1f} Hz  "
                   f"({len(self.yaw)/self.gyro_fvz:.2f}s)")
 
             self.viewer = OrientationViewer(
-                yaw = self.yaw,
-                pitch = self.pitch,
-                roll = self.roll,
-                tof_fvz = self.Fvz,
-                gyro_fvz = self.gyro_fvz,
-                tof_total_duration = self.tof_duration,
+                Q=self.Q,
+                yaw=self.yaw,
+                pitch=self.pitch,
+                roll=self.roll,
+                tof_fvz=self.Fvz,
+                gyro_fvz=self.gyro_fvz,
+                tof_total_duration=self.tof_duration,
             )
-
 
         n = len(self.names)
         self.fig, self.axes = plt.subplots(
@@ -165,7 +200,7 @@ class LabelTool:
         self.select_mode = False
 
         self.fig.canvas.mpl_connect("button_press_event", self.onclick)
-        self.fig.canvas.mpl_connect("key_press_event",   self.onkey)
+        self.fig.canvas.mpl_connect("key_press_event", self.onkey)
         self.update_title()
 
     def update_title(self):
@@ -181,7 +216,6 @@ class LabelTool:
     def onclick(self, event):
         if event.inaxes not in self.axes or event.xdata is None:
             return
-    
         x_time = event.xdata
         x = int(x_time * self.Fvz)
 
@@ -256,7 +290,7 @@ class LabelTool:
                 self.redraw()
                 print(f"Saved: {label} ({s}–{e})")
                 self.start = None
-                self.end   = None
+                self.end = None
 
     def draw_segment(self, seg):
         color = LABEL_COLORS[seg["label"]]
@@ -302,8 +336,8 @@ class LabelTool:
 
     def save(self):
         tof_matrix = self.signals[self.names[0]]
-        tof_fvz    = self.fvz_map[self.names[0]]
-        primary    = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
+        tof_fvz = self.fvz_map[self.names[0]]
+        primary = tof_matrix[:, 0] if tof_matrix.ndim > 1 else tof_matrix
 
         clean = []
         for s in self.segments:
@@ -318,7 +352,7 @@ class LabelTool:
                 )
                 angle_distance = [
                     [None if np.isnan(a) else round(a, 4),
-                    None if np.isnan(d) else round(d, 2)]
+                     None if np.isnan(d) else round(d, 2)]
                     for a, d in pairs
                 ]
 
