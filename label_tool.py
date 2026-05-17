@@ -9,14 +9,18 @@ from orientation_viewer import OrientationViewer
 
 LABELS = {
     "0": "no_obstacle",
-    "1": "obstacle",
-    "2": "very_close"
+    "1": "obstacle_left",
+    "2": "obstacle_right",
+    "3": "obstacle_center",
+    "4": "very_close"
 }
 
 LABEL_COLORS = {
-    "no_obstacle": "blue",
-    "obstacle": "orange",
-    "very_close": "red"
+    "no_obstacle":"#2ecc71", 
+    "obstacle_left":"#3498db",  
+    "obstacle_right":"#9b59b6", 
+    "obstacle_center":"#e67e22",  
+    "very_close":"#e74c3c",  
 }
 
 def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
@@ -138,6 +142,7 @@ class LabelTool:
 
         tof_samples = len(self.signals[self.names[0]])
         self.tof_duration = tof_samples / self.Fvz
+        self.total_samples = tof_samples
 
         self.Q = None
         self.yaw = None
@@ -198,18 +203,45 @@ class LabelTool:
         self.segments = []
         self.selected = None
         self.select_mode = False
+        self.fill_mode = False          
+        self.fill_pending = None       
 
         self.fig.canvas.mpl_connect("button_press_event", self.onclick)
         self.fig.canvas.mpl_connect("key_press_event", self.onkey)
         self.update_title()
 
+    def _find_gap(self, x):
+        for seg in self.segments:
+            if seg["start"] <= x <= seg["end"]:
+                return None
+
+        covered = sorted([(s["start"], s["end"]) for s in self.segments])
+
+        gap_start = 0
+        for s, e in covered:
+            if e < x:
+                gap_start = e + 1
+
+        gap_end = self.total_samples - 1
+        for s, e in covered:
+            if s > x:
+                gap_end = s - 1
+                break
+
+        return (gap_start, gap_end)
+
     def update_title(self):
-        if self.select_mode:
+        if self.fill_mode:
+            title = "[FILL MODE] Click whitespace gap → 0/1/2/3/4 to label | a=exit | h=save"
+            if self.fill_pending:
+                s, e = self.fill_pending
+                title += f"  |  Gap: {s/self.Fvz:.2f}s – {e/self.Fvz:.2f}s → press label key"
+        elif self.select_mode:
             title = "[SELECT MODE] Click segment | 0/1/2=change | d=delete | m=exit | h=save"
             if self.selected:
                 title += f"  |  Selected: {self.selected['label']}"
         else:
-            title = "[DRAW MODE] Click start/end → 0/1/2 to label | m=select mode | h=save"
+            title = "[DRAW MODE] Click start/end → 0/1/2/3/4 to label | m=select | a=fill | h=save"
         self.axes[0].set_title(title)
         self.fig.canvas.draw()
 
@@ -218,6 +250,32 @@ class LabelTool:
             return
         x_time = event.xdata
         x = int(x_time * self.Fvz)
+
+        if self.fill_mode:
+            if self.fill_pending is not None:
+                self.redraw()           
+
+            gap = self._find_gap(x)
+            if gap is None:
+                print("Clicked inside an existing segment — pick a white gap")
+                self.fill_pending = None
+                self.update_title()
+                return
+
+            gap_start, gap_end = gap
+            self.fill_pending = (gap_start, gap_end)
+
+            s_time = gap_start / self.Fvz
+            e_time = gap_end   / self.Fvz
+            for ax in self.axes:
+                ax.axvspan(s_time, e_time, alpha=0.15, color="gray", zorder=0)
+                ax.axvline(s_time, color="gray", linewidth=1, linestyle="--")
+                ax.axvline(e_time, color="gray", linewidth=1, linestyle="--")
+            self.fig.canvas.draw()
+            print(f"Gap found: sample {gap_start}–{gap_end}  "
+                  f"({s_time:.2f}s – {e_time:.2f}s)  → press 0/1/2/3/4 to label")
+            self.update_title()
+            return
 
         if self.select_mode:
             self.selected = None
@@ -248,13 +306,51 @@ class LabelTool:
             self.save()
             return
 
+        if event.key == "a":
+            if self.select_mode:
+                self.select_mode = False
+                self.selected = None
+            self.fill_mode = not self.fill_mode
+            self.fill_pending = None
+            self.start = None
+            self.end = None
+            print(f"{'Entered' if self.fill_mode else 'Exited'} fill mode")
+            self.redraw()
+            return
+
         if event.key == "m":
+            if self.fill_mode:
+                self.fill_mode = False
+                self.fill_pending = None
             self.select_mode = not self.select_mode
             self.selected = None
             self.start = None
             self.end = None
             print(f"{'Entered' if self.select_mode else 'Exited'} select mode")
             self.redraw()
+            return
+
+        if self.fill_mode:
+            if event.key in LABELS:
+                if self.fill_pending is None:
+                    print("Click a white gap first")
+                    return
+                gap_start, gap_end = self.fill_pending
+                label = LABELS[event.key]
+                seg = {
+                    "start": gap_start,
+                    "end": gap_end,
+                    "start_time": gap_start / self.Fvz,
+                    "end_time": gap_end   / self.Fvz,
+                    "label": label,
+                    "span": [],
+                    "start_line": [],
+                    "end_line": []
+                }
+                self.segments.append(seg)
+                self.fill_pending = None
+                self.redraw()
+                print(f"Saved (fill): {label} ({gap_start}–{gap_end})")
             return
 
         if self.select_mode:
@@ -268,29 +364,30 @@ class LabelTool:
                 self.redraw()
             elif event.key == "d":
                 self.delete_selected()
-        else:
-            if event.key in LABELS:
-                if self.start is None or self.end is None:
-                    print("Set start and end point first")
-                    return
-                label = LABELS[event.key]
-                s = min(self.start, self.end)
-                e = max(self.start, self.end)
-                seg = {
-                    "start": s,
-                    "end": e,
-                    "start_time": s / self.Fvz,
-                    "end_time": e / self.Fvz,
-                    "label": label,
-                    "span": [],
-                    "start_line": [],
-                    "end_line": []
-                }
-                self.segments.append(seg)
-                self.redraw()
-                print(f"Saved: {label} ({s}–{e})")
-                self.start = None
-                self.end = None
+            return
+
+        if event.key in LABELS:
+            if self.start is None or self.end is None:
+                print("Set start and end point first")
+                return
+            label = LABELS[event.key]
+            s = min(self.start, self.end)
+            e = max(self.start, self.end)
+            seg = {
+                "start": s,
+                "end": e,
+                "start_time": s / self.Fvz,
+                "end_time": e / self.Fvz,
+                "label": label,
+                "span": [],
+                "start_line": [],
+                "end_line": []
+            }
+            self.segments.append(seg)
+            self.redraw()
+            print(f"Saved: {label} ({s}–{e})")
+            self.start = None
+            self.end = None
 
     def draw_segment(self, seg):
         color = LABEL_COLORS[seg["label"]]
