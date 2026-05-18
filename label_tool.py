@@ -233,6 +233,14 @@ class LabelTool:
         valleys, _ = find_peaks(-yaw_tof, prominence=15)
 
         turns = np.sort(np.concatenate([peaks,valleys]))
+        if len(turns) == 0:
+            return []
+
+        if turns[0] > 0:
+            turns = np.concatenate([[0], turns])
+        if turns[-1] < self.total_samples - 1:
+            turns = np.concatenate([turns, [self.total_samples - 1]])
+            
         sweeps = []
         for i in range(len(turns) - 1 ):
             sweeps.append((turns[i], turns[i + 1]))
