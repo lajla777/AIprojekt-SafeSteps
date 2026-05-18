@@ -25,7 +25,7 @@ LABEL_COLORS = {
 
 def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
     t_src = np.arange(len(arr)) / src_fvz
-    t_dst = np.arange(dst_n)    / dst_fvz
+    t_dst = np.arange(dst_n)/ dst_fvz
 
     if arr.ndim == 1:
         out = np.zeros(dst_n)
@@ -41,7 +41,12 @@ def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
 
 
 def calibrate_mag(mag):
-    offset = (mag.max(axis=0) + mag.min(axis=0)) / 2.0
+
+    p_low, p_high = np.percentile(mag, [2, 98], axis=0)
+    mag_clipped = np.clip(mag, p_low, p_high)
+    
+    offset = (mag_clipped.max(axis=0) + mag_clipped.min(axis=0)) / 2.0
+
     mag_centered = mag - offset
 
     ranges = (mag.max(axis=0) - mag.min(axis=0)) / 2.0
@@ -70,13 +75,19 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
     if abs(mag_fvz - gyro_fvz) > 0.5 or len(mag) != N:
         mag = _resample_to_rate(mag, mag_fvz, gyro_fvz, N)
 
-    bias_samples = int(gyro_fvz * 1.0)
-    gyro_bias = gyro_raw[:bias_samples].mean(axis=0)
+    bias_samples = int(gyro_fvz * 2.0)
+    gyro_window = gyro_raw[:bias_samples]
+    if gyro_window.std(axis=0).max() < 0.5:
+        gyro_bias = gyro_window.mean(axis=0)
+    else:
+        gyro_bias = np.zeros(3)
+        print("WARNING: sensor wasn't still at start — bias not applied")
+
     gyro_debiased = gyro_raw - gyro_bias
     gyro_rad = np.deg2rad(gyro_debiased)
     print(f"Gyro bias — X:{gyro_bias[0]:.3f}  Y:{gyro_bias[1]:.3f}  Z:{gyro_bias[2]:.3f} °/s")
 
-    filter_ = Madgwick(frequency=gyro_fvz, beta=0.02)
+    filter_ = Madgwick(frequency=gyro_fvz, beta=0.07)
     Q = np.zeros((N, 4))
     Q[0] = [1.0, 0.0, 0.0, 0.0]
 
@@ -246,6 +257,12 @@ class LabelTool:
         self.fig.canvas.draw()
 
     def onclick(self, event):
+        if event.inaxes not in self.axes or event.xdata is None:  
+            return
+        x_time = event.xdata
+        x = int(x_time * self.Fvz)                             
+        if self.viewer is not None:                             
+            self.viewer.update(x)
         if event.inaxes not in self.axes or event.xdata is None:
             return
         x_time = event.xdata
@@ -454,10 +471,10 @@ class LabelTool:
                 ]
 
             clean.append({
-                "start": s["start"],
-                "end": s["end"],
-                "start_time": s["start_time"],
-                "end_time": s["end_time"],
+                # "start": s["start"],
+                # "end": s["end"],
+                # "start_time": s["start_time"],
+                # "end_time": s["end_time"],
                 "label": s["label"],
                 # "samples": [
                 #     None if np.isnan(v) else v
