@@ -211,20 +211,17 @@ class LabelTool:
                            y_label=name, ax=ax)
             ax.grid(True)
 
-        self.start = None
-        self.end = None
         self.segments = []
         self.selected = None
         self.select_mode = False
-        self.fill_mode = False          
-        self.fill_pending = None       
+        self.sweep_pending = None       
+
+        self.sweeps = self._find_sweeps()
+        self.draw_sweeps()
 
         self.fig.canvas.mpl_connect("button_press_event", self.onclick)
         self.fig.canvas.mpl_connect("key_press_event", self.onkey)
         self.update_title()
-
-        self.sweeps = self._find_sweeps()
-        self.draw_sweeps()
         self.fig.canvas.draw()
     
     def _find_sweeps(self):
@@ -245,10 +242,10 @@ class LabelTool:
         for i, (s,e) in enumerate(self.sweeps):
             s_time = s / self.Fvz
             e_time = e / self.Fvz
-            color = "#2000f3" if i % 2 == 0 else "#ff8706"
+            color = "#2000f3" if i % 2 == 0 else "#ff6200"
 
             for ax in self.axes:
-                ax.axvline(s_time, color=color, lw=0.8, linestyle=":", alpha=0.6)
+                ax.axvline(s_time, color=color, lw=1.4, linestyle=":", alpha=0.9)
             mid_time = (s_time + e_time) / 2
             self.axes[0].text(
                 mid_time, 0.97, f"S{i+1}",
@@ -279,57 +276,32 @@ class LabelTool:
         return (gap_start, gap_end)
 
     def update_title(self):
-        if self.fill_mode:
-            title = "[FILL MODE] Click whitespace gap → 0/1/2/3/4 to label | a=exit | h=save"
-            if self.fill_pending:
-                s, e = self.fill_pending
-                title += f"  |  Gap: {s/self.Fvz:.2f}s – {e/self.Fvz:.2f}s → press label key"
-        elif self.select_mode:
-            title = "[SELECT MODE] Click segment | 0/1/2=change | d=delete | m=exit | h=save"
+        if self.select_mode:
+            title = "[SELECT MODE] Click segment | 0/1/2/3/4=change | d=delete | m=exit | h=save"
             if self.selected:
                 title += f"  |  Selected: {self.selected['label']}"
         else:
-            title = "[DRAW MODE] Click start/end → 0/1/2/3/4 to label | m=select | a=fill | h=save"
+            title = "[SWEEP MODE] Click sweep → 0/1/2/3/4 to label | m=select | h=save"
+            if self.sweep_pending:
+                s, e = self.sweep_pending
+                title += f"  |  Sweep: {s/self.Fvz:.2f}s – {e/self.Fvz:.2f}s → press label key"
         self.axes[0].set_title(title)
         self.fig.canvas.draw()
+
 
     def onclick(self, event):
         if event.inaxes not in self.axes or event.xdata is None:  
             return
         x_time = event.xdata
-        x = int(x_time * self.Fvz)                             
+        x = int(x_time * self.Fvz) 
+
         if self.viewer is not None:                             
             self.viewer.update(x)
         if event.inaxes not in self.axes or event.xdata is None:
             return
+        
         x_time = event.xdata
         x = int(x_time * self.Fvz)
-
-        if self.fill_mode:
-            if self.fill_pending is not None:
-                self.redraw()           
-
-            gap = self._find_gap(x)
-            if gap is None:
-                print("Clicked inside an existing segment — pick a white gap")
-                self.fill_pending = None
-                self.update_title()
-                return
-
-            gap_start, gap_end = gap
-            self.fill_pending = (gap_start, gap_end)
-
-            s_time = gap_start / self.Fvz
-            e_time = gap_end   / self.Fvz
-            for ax in self.axes:
-                ax.axvspan(s_time, e_time, alpha=0.15, color="gray", zorder=0)
-                ax.axvline(s_time, color="gray", linewidth=1, linestyle="--")
-                ax.axvline(e_time, color="gray", linewidth=1, linestyle="--")
-            self.fig.canvas.draw()
-            print(f"Gap found: sample {gap_start}–{gap_end}  "
-                  f"({s_time:.2f}s – {e_time:.2f}s)  → press 0/1/2/3/4 to label")
-            self.update_title()
-            return
 
         if self.select_mode:
             self.selected = None
@@ -342,69 +314,43 @@ class LabelTool:
                 print("No segment at click position")
             self.update_title()
         else:
-            if self.start is None:
-                self.start = x
-                for ax in self.axes:
-                    ax.axvline(x / self.Fvz, color="green")
-                self.fig.canvas.draw()
-                print(f"Start: {x}")
-            else:
-                self.end = x
-                for ax in self.axes:
-                    ax.axvline(x / self.Fvz, color="black")
-                self.fig.canvas.draw()
-                print(f"End: {x}")
+            clicked_sweep = None
+            for s, e in self.sweeps:
+                if s <= x <= e:
+                    clicked_sweep = (s,e)
+                    break
+            if clicked_sweep is None:
+                print("Click inside a sweep region")
+                self.sweep_pending = None
+                self.redraw()
+                return 
+            
+            self.sweep_pending = clicked_sweep
+            s_time = clicked_sweep[0] / self.Fvz
+            e_time = clicked_sweep[1] / self.Fvz
+
+            self.redraw()
+
+            for ax in self.axes:
+                ax.axvspan(s_time, e_time, alpha=0.15, color="white", zorder=0)
+                ax.axvline(s_time, color="white", lw=1.5, linestyle="--")
+                ax.axvline(e_time, color="white", lw=1.5, linestyle="--")
+
+            self.fig.canvas.draw()
+            print(f"Sweep selected: {s_time:.2f}s – {e_time:.2f}s → press 0/1/2/3/4 to label")
+            self.update_title()    
 
     def onkey(self, event):
         if event.key == "h":
             self.save()
             return
 
-        if event.key == "a":
-            if self.select_mode:
-                self.select_mode = False
-                self.selected = None
-            self.fill_mode = not self.fill_mode
-            self.fill_pending = None
-            self.start = None
-            self.end = None
-            print(f"{'Entered' if self.fill_mode else 'Exited'} fill mode")
-            self.redraw()
-            return
-
         if event.key == "m":
-            if self.fill_mode:
-                self.fill_mode = False
-                self.fill_pending = None
             self.select_mode = not self.select_mode
             self.selected = None
-            self.start = None
-            self.end = None
+            self.sweep_pending = None
             print(f"{'Entered' if self.select_mode else 'Exited'} select mode")
             self.redraw()
-            return
-
-        if self.fill_mode:
-            if event.key in LABELS:
-                if self.fill_pending is None:
-                    print("Click a white gap first")
-                    return
-                gap_start, gap_end = self.fill_pending
-                label = LABELS[event.key]
-                seg = {
-                    "start": gap_start,
-                    "end": gap_end,
-                    "start_time": gap_start / self.Fvz,
-                    "end_time": gap_end   / self.Fvz,
-                    "label": label,
-                    "span": [],
-                    "start_line": [],
-                    "end_line": []
-                }
-                self.segments.append(seg)
-                self.fill_pending = None
-                self.redraw()
-                print(f"Saved (fill): {label} ({gap_start}–{gap_end})")
             return
 
         if self.select_mode:
@@ -418,18 +364,16 @@ class LabelTool:
                 self.redraw()
             elif event.key == "d":
                 self.delete_selected()
-            return
-
+        
         if event.key in LABELS:
-            if self.start is None or self.end is None:
-                print("Set start and end point first")
+            if self.sweep_pending is None:
+                print("Click a sweep first")
                 return
+            s, e  = self.sweep_pending
             label = LABELS[event.key]
-            s = min(self.start, self.end)
-            e = max(self.start, self.end)
             seg = {
-                "start": s,
-                "end": e,
+                "start":s,
+                "end":e,
                 "start_time": s / self.Fvz,
                 "end_time": e / self.Fvz,
                 "label": label,
@@ -438,10 +382,9 @@ class LabelTool:
                 "end_line": []
             }
             self.segments.append(seg)
+            self.sweep_pending = None
             self.redraw()
             print(f"Saved: {label} ({s}–{e})")
-            self.start = None
-            self.end = None
 
     def draw_segment(self, seg):
         color = LABEL_COLORS[seg["label"]]
@@ -471,6 +414,7 @@ class LabelTool:
             prikazi_signal(self.signals[name], Fvz=self.fvz_map[name],
                            y_label=name, ax=ax)
             ax.grid(True)
+        self.draw_sweeps()
         for seg in self.segments:
             self.draw_segment(seg)
         self.fig.canvas.draw()
