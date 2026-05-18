@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy.spatial.transform import Rotation as R
+from scipy.signal import find_peaks
 
 from visualisation import prikazi_signal
 from orientation_viewer import OrientationViewer
@@ -38,6 +39,7 @@ def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
     for ch in range(arr.shape[1]):
         out[mask, ch] = np.interp(t_dst[mask], t_src, arr[:, ch])
     return out
+
 
 
 def calibrate_mag(mag):
@@ -220,6 +222,41 @@ class LabelTool:
         self.fig.canvas.mpl_connect("button_press_event", self.onclick)
         self.fig.canvas.mpl_connect("key_press_event", self.onkey)
         self.update_title()
+
+        self.sweeps = self._find_sweeps()
+        self.draw_sweeps()
+        self.fig.canvas.draw()
+    
+    def _find_sweeps(self):
+        if self.yaw is None:
+            return []
+        yaw_tof = np.interp(np.arange(self.total_samples)/self.Fvz, np.arange(len(self.yaw)) / self.gyro_fvz,self.yaw)
+
+        peaks, _ = find_peaks(yaw_tof, prominence=15)
+        valleys, _ = find_peaks(-yaw_tof, prominence=15)
+
+        turns = np.sort(np.concatenate([peaks,valleys]))
+        sweeps = []
+        for i in range(len(turns) - 1 ):
+            sweeps.append((turns[i], turns[i + 1]))
+        return sweeps
+    
+    def draw_sweeps(self):
+        for i, (s,e) in enumerate(self.sweeps):
+            s_time = s / self.Fvz
+            e_time = e / self.Fvz
+            color = "#2000f3" if i % 2 == 0 else "#ff8706"
+
+            for ax in self.axes:
+                ax.axvline(s_time, color=color, lw=0.8, linestyle=":", alpha=0.6)
+            mid_time = (s_time + e_time) / 2
+            self.axes[0].text(
+                mid_time, 0.97, f"S{i+1}",
+                transform=self.axes[0].get_xaxis_transform(),
+                ha="center", va="top",
+                fontsize=6, color=color, alpha=0.8
+            )
+
 
     def _find_gap(self, x):
         for seg in self.segments:
