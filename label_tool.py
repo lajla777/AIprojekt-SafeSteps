@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from scipy.spatial.transform import Rotation as R
 from scipy.signal import find_peaks
+from ahrs.filters import Madgwick
 
 from visualisation import prikazi_signal
 from orientation_viewer import OrientationViewer
@@ -13,15 +14,15 @@ LABELS = {
     "1": "obstacle_left",
     "2": "obstacle_right",
     "3": "obstacle_center",
-    "4": "very_close"
+    "4": "obstacle_right_left"
 }
 
 LABEL_COLORS = {
     "no_obstacle":"#2ecc71", 
     "obstacle_left":"#3498db",  
     "obstacle_right":"#9b59b6", 
-    "obstacle_center":"#e67e22",  
-    "very_close":"#e74c3c",  
+    "obstacle_center":"#f9841d",  
+    "obstacle_right_left":"#e74c3c",  
 }
 
 def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
@@ -64,8 +65,6 @@ def calibrate_mag(mag):
           f"Z:{mag_cal[:,2].max()-mag_cal[:,2].min():.3f}")
     return mag_cal
 
-
-from ahrs.filters import Madgwick
 
 def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
     gyro_raw = gyro.copy()
@@ -227,23 +226,32 @@ class LabelTool:
     def _find_sweeps(self):
         if self.yaw is None:
             return []
-        yaw_tof = np.interp(np.arange(self.total_samples)/self.Fvz, np.arange(len(self.yaw)) / self.gyro_fvz,self.yaw)
-
+        yaw_tof = np.interp(np.arange(self.total_samples)/self.Fvz, np.arange(len(self.yaw)) / self.gyro_fvz, self.yaw)
         peaks, _ = find_peaks(yaw_tof, prominence=15)
         valleys, _ = find_peaks(-yaw_tof, prominence=15)
-
-        turns = np.sort(np.concatenate([peaks,valleys]))
+        turns = np.sort(np.concatenate([peaks, valleys]))
         if len(turns) == 0:
             return []
-
         if turns[0] > 0:
             turns = np.concatenate([[0], turns])
         if turns[-1] < self.total_samples - 1:
             turns = np.concatenate([turns, [self.total_samples - 1]])
-            
+
         sweeps = []
-        for i in range(len(turns) - 1 ):
+        for i in range(len(turns) - 1):
             sweeps.append((turns[i], turns[i + 1]))
+
+        if len(sweeps) >= 4:
+            first_merged = (sweeps[0][0], sweeps[1][1])
+            last_merged = (sweeps[-2][0], sweeps[-1][1])
+            sweeps = [first_merged] + sweeps[2:-2] + [last_merged]
+        elif len(sweeps) == 3:
+            first_merged = (sweeps[0][0], sweeps[1][1])
+            last_merged = (sweeps[1][0], sweeps[2][1])
+            sweeps = [first_merged, last_merged]
+        elif len(sweeps) == 2:
+            sweeps = [(sweeps[0][0], sweeps[1][1])]
+
         return sweeps
     
     def draw_sweeps(self):
