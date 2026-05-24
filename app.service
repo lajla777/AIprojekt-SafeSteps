@@ -1,0 +1,16 @@
+[Unit]
+Description=SPO STM32 TCP Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/app
+ExecStart=python "C:\Users\lajla\OneDrive\Dokumenti\faks\sistemskaProgramskaOprema\spo_stm32_service\service_updated.py"
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
