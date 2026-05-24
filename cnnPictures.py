@@ -71,7 +71,6 @@ patience_counter = 0
 
 # TRENIRANJE IN VALIDACIJA
 def train_epoch():
-    """Ena epoca treniranja"""
     model.train()
     total_loss = 0
     
@@ -171,7 +170,7 @@ def test():
     return accuracy
 
 # TRENIRANJE
-num_epochs = 50
+num_epochs = 2
 print("\n" + "="*50)
 print("ZAČENJA SE TRENIRANJE")
 print("="*50 + "\n")
