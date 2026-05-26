@@ -19,6 +19,7 @@ BAUDRATE = 115200
 SERIAL_TIMEOUT = 2
 SCAN_INTERVAL = 2
 WORK_DIR = os.getcwd()
+STREAM_CAPTURE_SECONDS = 5
 
 SYNC = b"\xFF\xFF"
 
@@ -379,6 +380,40 @@ def process_file(filename):
     except Exception as e:
         return False, f"FAIL: processing {filename} failed: {e}"
 
+
+def capture_stream_from_serial(ser, seconds=STREAM_CAPTURE_SECONDS):
+    """
+    Fallback način za STM32, ki ne podpira datotečnih ukazov.
+    Nekaj sekund bere binarni serial stream, ga shrani v .bin in obdela.
+    """
+    
+    filename = f"stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bin"
+    path = os.path.join(WORK_DIR, filename)
+
+    end_time = time.time() + seconds
+    total = 0
+
+    log(f"Fallback stream capture started ({seconds} s)")
+
+    with open(path, "wb") as f:
+        while time.time() < end_time:
+            chunk = ser.read(512)
+            if chunk:
+                f.write(chunk)
+                total += len(chunk)
+
+    if total == 0:
+        return False, "FAIL: no data received from STM32 stream"
+
+    log(f"Fallback stream saved {total} bytes to {filename}")
+
+    ok, processed = process_file(filename)
+    if not ok:
+        return False, processed
+
+    log(f"Processed outputs: {processed}")
+    return True, filename
+
 #komunikacija s stm
 def read_line_from_serial(ser):
     line = ser.readline()
@@ -417,6 +452,55 @@ def receive_file_from_serial(ser, header):
     log(f"Processed outputs: {processed}")
     return True, filename
 
+def stm32_list_files(ser):
+    """Pošlje LIST ukaz STM32 in vrne seznam imen datotek."""
+    ser.reset_input_buffer()
+    ser.write(b"LIST\n")
+    ser.flush()
+
+    files = []
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        line = read_line_from_serial(ser)
+        if not line:
+            continue
+        if line.strip() == ">":
+            break
+        parts = line.split()
+        if len(parts) == 2 and parts[0].upper().endswith(".BIN"):
+            files.append(parts[0])
+
+    return files
+
+
+def stm32_get_file(ser, filename):
+    """Pošlje GET <filename> STM32 in shrani binarno vsebino na disk."""
+    ser.reset_input_buffer()
+    ser.write(f"GET {filename}\n".encode("utf-8"))
+    ser.flush()
+
+    path = os.path.join(WORK_DIR, filename)
+    total = 0
+    deadline = time.time() + 60
+
+    with open(path, "wb") as f:
+        while time.time() < deadline:
+            chunk = ser.read(512)
+            if chunk:
+                f.write(chunk)
+                total += len(chunk)
+                deadline = time.time() + 5
+            else:
+                if ser.in_waiting == 0 and total > 0:
+                    break
+
+    if total == 0:
+        return False, f"FAIL: no data received for {filename}"
+
+    log(f"Received {total} bytes for {filename}")
+    return True, filename
+
+
 def execute_stm32_command(command):
     if not is_stm32_connected():
         return "FAIL: STM32 is not connected\n"
@@ -429,45 +513,58 @@ def execute_stm32_command(command):
             return "FAIL: STM32 is not connected\n"
 
         try:
-            ser.reset_input_buffer()
-            ser.write((command + "\n").encode("utf-8"))
-            ser.flush()
-
-            received_files = []
-            deadline = time.time() + 30
-
-            while time.time() < deadline:
-                line = read_line_from_serial(ser)
-
-                if not line:
-                    continue
-
-                if line.startswith("FAIL"):
-                    return line + "\n"
-
-                if line == "OK":
-                    if command == "DELETE":
-                        return "All files on STM32 are deleted\n"
-                    return "OK\n"
-
-                if line.startswith("FILE|"):
-                    ok, result = receive_file_from_serial(ser, line)
+            if command == "GET_ALL":
+                files = stm32_list_files(ser)
+                if not files:
+                    return "FAIL: no files found on STM32\n"
+                for filename in files:
+                    ok, result = stm32_get_file(ser, filename)
                     if not ok:
                         return result + "\n"
-                    received_files.append(result)
-                    continue
+                    ok, processed = process_file(filename)
+                    if not ok:
+                        return processed + "\n"
+                    log(f"Processed: {processed}")
+                return "All files from STM32 are processed\n"
 
-                if line == "END":
-                    if command == "GET_LAST":
-                        return "Last file from STM32 has been processed\n"
-                    if command == "GET_ALL":
-                        return "All files from STM32 are processed\n"
-                    if command.startswith("GET_FILE|"):
-                        filename = command.split("|", 1)[1]
-                        return f"File {filename} from STM32 has been processed\n"
-                    return "OK\n"
+            elif command == "GET_LAST":
+                files = stm32_list_files(ser)
+                if not files:
+                    return "FAIL: no files found on STM32\n"
+                filename = files[-1]
+                ok, result = stm32_get_file(ser, filename)
+                if not ok:
+                    return result + "\n"
+                ok, processed = process_file(filename)
+                if not ok:
+                    return processed + "\n"
+                log(f"Processed: {processed}")
+                return "Last file from STM32 has been processed\n"
 
-            return "FAIL: timeout while waiting for STM32 response\n"
+            elif command.startswith("GET_FILE|"):
+                filename = command.split("|", 1)[1].strip()
+                ok, result = stm32_get_file(ser, filename)
+                if not ok:
+                    return result + "\n"
+                ok, processed = process_file(filename)
+                if not ok:
+                    return processed + "\n"
+                log(f"Processed: {processed}")
+                return f"File {filename} from STM32 has been processed\n"
+
+            elif command == "DELETE":
+                ser.reset_input_buffer()
+                ser.write(b"DELETE\n")
+                ser.flush()
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    line = read_line_from_serial(ser)
+                    if line.strip() == ">":
+                        break
+                return "All files on STM32 are deleted\n"
+
+            else:
+                return "FAIL: unknown command\n"
 
         except (serial.SerialException, OSError):
             close_serial_connection()
