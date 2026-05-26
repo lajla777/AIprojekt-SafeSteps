@@ -26,17 +26,25 @@ LABEL_COLORS = {
 }
 
 def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
+
+    # časovna os originalnega signala
     t_src = np.arange(len(arr)) / src_fvz
+    # časovna os novega
     t_dst = np.arange(dst_n)/ dst_fvz
 
+    # 1D signal
     if arr.ndim == 1:
         out = np.zeros(dst_n)
+        # omejimo območje
         mask = t_dst <= t_src[-1]
+        #interpolacija
         out[mask] = np.interp(t_dst[mask], t_src, arr)
         return out
 
+    # več kanalni
     out = np.zeros((dst_n, arr.shape[1]))
     mask = t_dst <= t_src[-1]
+    # interpolacija vsakega posebej
     for ch in range(arr.shape[1]):
         out[mask, ch] = np.interp(t_dst[mask], t_src, arr[:, ch])
     return out
@@ -44,19 +52,48 @@ def _resample_to_rate(arr, src_fvz, dst_fvz, dst_n):
 
 
 def calibrate_mag(mag):
+    """
+    Kalibracija magnetometra
+    Odstrani soft and hard iron distorcijo:
+        stalni zamik
+        različno skalirane osi
 
+    Hard iron disortion:
+        odstranitev outajerjev 
+      
+    Soft iron distortion :
+        avg_delta_x = (max(x) - min(x)) / 2
+        ... isto za y in z
+
+        avg_delta = (avg_delta_x + avg_delta_y + avg_delta_z) / 3
+
+        scale_x = avg_delta / avg_delta_x
+        ... isto za y in z
+
+        corrected_x = (sensor_x - offset_x) * scale_x
+        ... isto za y in z
+        
+    """
+ 
+    # odstrani ekstremne outliere (šum) zgornji 2% in spodnji 2%
     p_low, p_high = np.percentile(mag, [2, 98], axis=0)
     mag_clipped = np.clip(mag, p_low, p_high)
     
+    # omeji vredost na interval low-high
     offset = (mag_clipped.max(axis=0) + mag_clipped.min(axis=0)) / 2.0
 
+    # centriranje 
     mag_centered = mag - offset
 
     ranges = (mag.max(axis=0) - mag.min(axis=0)) / 2.0
+    # povprečen razpon okrog vseh osi 
     avg_range = ranges.mean()
+    # osi z manjšim razponom povečamo in obratno
     scale = avg_range / ranges
+    # omejitev da se ne skalira preveč
     scale = np.clip(scale, 0.1, 5.0)  
 
+    #skaliranje teh podatkov
     mag_cal = mag_centered * scale
     print(f"Mag hard-iron offset — X:{offset[0]:.3f}  Y:{offset[1]:.3f}  Z:{offset[2]:.3f}")
     print(f"Mag soft-iron scale  — X:{scale[0]:.3f}  Y:{scale[1]:.3f}  Z:{scale[2]:.3f}")
@@ -67,16 +104,35 @@ def calibrate_mag(mag):
 
 
 def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
+    """
+    Izračun kvanterniona + Eulerjevi koti
+
+        - odstrani bias žiroskopa -- poiskusno ne spremeni veliko
+        - izračuna orientacijo z Madgwick
+        - odstrani začetno referenco (zeroing)
+        - pretvori v Eulerjeve kote
+
+        Vrne: 
+            Q - kvanternioni [w,x,y,z]
+            yaw - zasuk okoli Z osi
+            pitch - naklon
+            roll - nagib
+
+    """
     gyro_raw = gyro.copy()
     N = len(gyro_raw)
-    dt = 1.0 / gyro_fvz
+
+    # Če je frekvenca ali dolžina drugačna interpolacija
 
     if abs(accel_fvz - gyro_fvz) > 0.5 or len(accel) != N:
         accel = _resample_to_rate(accel, accel_fvz, gyro_fvz, N)
     if abs(mag_fvz - gyro_fvz) > 0.5 or len(mag) != N:
         mag = _resample_to_rate(mag, mag_fvz, gyro_fvz, N)
 
-    bias_samples = int(gyro_fvz * 2.0)
+    # apliciranje biasa če je na začetku senzor pri miru 
+    # preiskus--- bolj malo spremeni
+    bias_samples = int(gyro_fvz * 2.0) # vzame prve 2 sekundi preveri če je primiru
+
     gyro_window = gyro_raw[:bias_samples]
     if gyro_window.std(axis=0).max() < 0.5:
         gyro_bias = gyro_window.mean(axis=0)
@@ -84,13 +140,14 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
         gyro_bias = np.zeros(3)
         print("WARNING: sensor wasn't still at start — bias not applied")
 
-    gyro_debiased = gyro_raw - gyro_bias
-    gyro_rad = np.deg2rad(gyro_debiased)
+
+    gyro_debiased = gyro_raw - gyro_bias # odstranitev biasa bolj poiskus ni spremenilo veliko
+    gyro_rad = np.deg2rad(gyro_debiased) # žiroskop v radiane 
     print(f"Gyro bias — X:{gyro_bias[0]:.3f}  Y:{gyro_bias[1]:.3f}  Z:{gyro_bias[2]:.3f} °/s")
 
-    filter_ = Madgwick(frequency=gyro_fvz, beta=0.07)
+    filter_ = Madgwick(frequency=gyro_fvz, beta=0.07) #filter 
     Q = np.zeros((N, 4))
-    Q[0] = [1.0, 0.0, 0.0, 0.0]
+    Q[0] = [1.0, 0.0, 0.0, 0.0] #začetna orientacija
 
     for t in range(1, N):
         Q[t] = filter_.updateMARG(
@@ -100,9 +157,10 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
             mag=mag[t]
         )
 
-    q0 = Q[0]
-    r0_inv = R.from_quat([q0[1], q0[2], q0[3], q0[0]]).inv()
+    q0 = Q[0] # začetni kvanternion
+    r0_inv = R.from_quat([q0[1], q0[2], q0[3], q0[0]]).inv() #inverz 
 
+    # vse rotacije relativno na začetek
     for i in range(N):
         qi = Q[i]
         ri = R.from_quat([qi[1], qi[2], qi[3], qi[0]])
@@ -110,8 +168,10 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
         q_new = r_zeroed.as_quat()  
         Q[i] = [q_new[3], q_new[0], q_new[1], q_new[2]]  
 
+     # SciPy uporablja format [x, y, z, w]
     rots = R.from_quat(Q[:, [1, 2, 3, 0]])
-    euler = rots.as_euler('ZYX', degrees=True)
+     # ZYX vrstni red (yaw-pitch-roll)
+    euler = rots.as_euler('ZYX', degrees=True) # eulerjevi koti
     yaw   = euler[:, 0]
     pitch = euler[:, 1]
     roll  = euler[:, 2]
@@ -121,7 +181,7 @@ def orientation(gyro, accel, mag, gyro_fvz, accel_fvz, mag_fvz):
     return Q, yaw, pitch, roll
 
 def pair_angle_distance(yaw, tof_matrix, gyro_fvz, tof_fvz):
-
+    """Naredi pare za json datoteko [angle, distance]"""
     N_tof = len(tof_matrix)
     N_yaw = len(yaw)
 
@@ -224,6 +284,10 @@ class LabelTool:
         self.fig.canvas.draw()
     
     def _find_sweeps(self):
+        """
+        Najde min in max yaw signala (peaks and valleys)
+        z funkcijo find_peaks in tvori sweeps (gibe levo-desno)
+        """
         if self.yaw is None:
             return []
         yaw_tof = np.interp(np.arange(self.total_samples)/self.Fvz, np.arange(len(self.yaw)) / self.gyro_fvz, self.yaw)
@@ -241,6 +305,7 @@ class LabelTool:
         for i in range(len(turns) - 1):
             sweeps.append((turns[i], turns[i + 1]))
 
+        # merga prvi in zadnji sweep z ostalimi, ker navadno niso celotni  
         if len(sweeps) >= 4:
             first_merged = (sweeps[0][0], sweeps[1][1])
             last_merged = (sweeps[-2][0], sweeps[-1][1])
@@ -272,6 +337,7 @@ class LabelTool:
 
 
     def _find_gap(self, x):
+        """ni trenutno uporabljeno--- uporabljeno v prejšnji verziji"""
         for seg in self.segments:
             if seg["start"] <= x <= seg["end"]:
                 return None
@@ -483,4 +549,4 @@ class LabelTool:
         with open(self.save_path, "w") as f:
             json.dump(clean, f, indent=2)
 
-        print(f"Saved {len(clean)} segments → {self.save_path}")
+        print(f"Saved {len(clean)} segments {self.save_path}")
