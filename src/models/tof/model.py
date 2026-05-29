@@ -1,6 +1,5 @@
 import torch.nn as nn
 
-
 class ObstacleCNN(nn.Module):
     def __init__(self, num_classes=5):
         super().__init__()

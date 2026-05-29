@@ -10,7 +10,7 @@ from decoder.decode import decode_file
 from tools.visualization import sestavi_podatke, v_pakete
 from tools.label_tool import calibrate_mag, orientation, pair_angle_distance
 
-from src.models.tof.model import ObstacleCNN
+from models.tof.model import ObstacleCNN
 
 WINDOW_SEC = 1.0    
 STRIDE_SEC = 0.5
