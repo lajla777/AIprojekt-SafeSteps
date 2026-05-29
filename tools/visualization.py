@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
-from decode import decode_file
+from decoder.decode import decode_file
 import matplotlib.pyplot as plt
 
 RESOLUTION = {
