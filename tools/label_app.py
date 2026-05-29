@@ -1,14 +1,19 @@
 import os
 import sys
 import matplotlib.pyplot as plt
+from pathlib import Path
 
-from decode import decode_file
-from visualization import sestavi_podatke, v_pakete
+from decoder.decode import decode_file
+from tools.visualization import sestavi_podatke, v_pakete
+
 from collections import Counter
 
-from label_tool import LabelTool
+from tools.label_tool import LabelTool
 
-LABELS_DIR = "labels"
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+
+LABELS_DIR = PROJECT_ROOT / "labels"
 
 
 def get_bin_path():
@@ -24,14 +29,13 @@ def get_bin_path():
         sys.exit(1)
 
     return path
-
-
 def make_save_path(bin_path):
-    os.makedirs(LABELS_DIR, exist_ok=True)
-    stem = os.path.splitext(os.path.basename(bin_path))[0] 
-    filename = f"labels_{stem}.json"
-    return os.path.join(LABELS_DIR, filename)
+    LABELS_DIR.mkdir(exist_ok=True)
 
+    stem = Path(bin_path).stem
+    filename = f"labels_{stem}.json"
+
+    return LABELS_DIR / filename
 
 if __name__ == "__main__":
     bin_path = get_bin_path()
