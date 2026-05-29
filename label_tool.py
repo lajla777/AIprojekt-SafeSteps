@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R
 from scipy.signal import find_peaks
 from ahrs.filters import Madgwick
 
-from visualisation import prikazi_signal
+from visualization import prikazi_signal
 from orientation_viewer import OrientationViewer
 
 LABELS = {
