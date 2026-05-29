@@ -8,9 +8,9 @@ from sklearn.metrics import classification_report, confusion_matrix
 from pathlib import Path
 from datetime import datetime
 
-from models.tof.dataset import SweepDataset
-from models.tof.model import ObstacleCNN
-from models.tof.dataset import LABEL_IDX
+from src.models.tof.dataset import SweepDataset
+from src.models.tof.model import ObstacleCNN
+from src.models.tof.dataset import LABEL_IDX
 import json as _json
 
 JSON_DIR = r"C:\Users\larap\OneDrive\Priloge\Namizje\FERI\projekt\AIprojekt-SafeSteps\labels"
