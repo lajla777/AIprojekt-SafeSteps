@@ -6,9 +6,9 @@ from torch.utils.data import DataLoader, WeightedRandomSampler, Subset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
-from dataset import SweepDataset
-from model import ObstacleCNN
-from dataset import LABEL_IDX
+from models.tof.dataset import SweepDataset
+from models.tof.model import ObstacleCNN
+from models.tof.dataset import LABEL_IDX
 import json as _json
 
 JSON_DIR = r"C:\Users\larap\OneDrive\Priloge\Namizje\FERI\projekt\AIprojekt-SafeSteps\labels"
