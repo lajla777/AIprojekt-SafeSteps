@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from src.models.tof.model import ObstacleCNN
+from models.tof.model import ObstacleCNN
 
 LABEL_NAMES = ["no_obstacle", 
                "obstacle_left", 
