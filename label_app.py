@@ -3,7 +3,7 @@ import sys
 import matplotlib.pyplot as plt
 
 from decode import decode_file
-from visualisation import sestavi_podatke, v_pakete
+from visualization import sestavi_podatke, v_pakete
 from collections import Counter
 
 from label_tool import LabelTool

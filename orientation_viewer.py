@@ -230,7 +230,7 @@ class OrientationViewer:
             "o", color="#e5c07b", markersize=7, zorder=5
         )
         self.path_tail, = ax.plot(
-            [], [], color="#e5c07b", lw=1.8, alpha=0.8
+            [], [], color="#f6d79e", lw=1.8, alpha=0.8
         )
 
 
