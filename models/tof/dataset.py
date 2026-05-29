@@ -4,10 +4,10 @@ import torch
 from torch.utils.data import Dataset
 
 LABEL_IDX = {
-    "no_obstacle":        0,
-    "obstacle_left":      1,
-    "obstacle_right":     2,
-    "obstacle_center":    3,
+    "no_obstacle": 0,
+    "obstacle_left": 1,
+    "obstacle_right": 2,
+    "obstacle_center": 3,
     "obstacle_right_left":4,
 }
 IDX_TO_LABEL = {v: k for k, v in LABEL_IDX.items()}
@@ -75,8 +75,8 @@ class SweepDataset(Dataset):
         ad = ad.copy()
         angle_rad = np.deg2rad(ad[:, 0])
         out = np.zeros((len(ad), 3), dtype=np.float32)
-        out[:, 0] = np.sin(angle_rad)   # sin(θ)
-        out[:, 1] = np.cos(angle_rad)   # cos(θ)
+        out[:, 0] = np.sin(angle_rad) 
+        out[:, 1] = np.cos(angle_rad)   
         out[:, 2] = np.clip(ad[:, 1], 0, 4000) / 4000.0
         return out
 
