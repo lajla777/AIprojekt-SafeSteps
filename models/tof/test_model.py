@@ -3,9 +3,13 @@ import torch
 import sys
 import os
 
-from decode import decode_file
-from visualisation import sestavi_podatke, v_pakete
-from label_tool import calibrate_mag, orientation, pair_angle_distance
+from pathlib import Path
+
+from decoder.decode import decode_file
+
+from tools.visualization import sestavi_podatke, v_pakete
+from tools.label_tool import calibrate_mag, orientation, pair_angle_distance
+
 from models.tof.model import ObstacleCNN
 
 WINDOW_SEC = 1.0    
@@ -35,7 +39,8 @@ LABEL_NAMES = [
 ]
 
 model = ObstacleCNN(num_classes=len(LABEL_NAMES))
-model.load_state_dict(torch.load("best_model.pth", map_location=DEVICE))
+MODEL_PATH = Path(__file__).resolve().parent / "best_model.pth"
+model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.to(DEVICE)
 model.eval()
 

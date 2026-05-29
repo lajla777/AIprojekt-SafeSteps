@@ -5,6 +5,8 @@ import numpy as np
 from torch.utils.data import DataLoader, WeightedRandomSampler, Subset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
+from pathlib import Path
+from datetime import datetime
 
 from models.tof.dataset import SweepDataset
 from models.tof.model import ObstacleCNN
@@ -27,6 +29,15 @@ LABEL_NAMES = [
     "obstacle_right_left",
 ]
 
+def make_run_model_path():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return MODEL_DIR / f"model_{timestamp}.pth"
+
+MODEL_DIR = Path(__file__).resolve().parent / "checkpoints"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+
+
 all_files = glob.glob(os.path.join(JSON_DIR, "**", "*.json"), recursive=True)
 print(f"Total files: {len(all_files)}")
 
@@ -37,7 +48,7 @@ for path in all_files:
     for seg in segs:
         if not seg.get("angle_distance") or seg.get("label") not in LABEL_IDX:
             continue
-        angles = [row[0] for row in seg["angle_distance"] if row[0] == row[0]]  # skip NaN
+        angles = [row[0] for row in seg["angle_distance"] if row[0] == row[0]] 
         if not angles:
             continue
         name = seg["label"]
@@ -190,8 +201,6 @@ for epoch in range(EPOCHS):
 
     if val_acc > best_val_acc:
         best_val_acc = val_acc
-        torch.save(model.state_dict(), "best_model.pth")
-        print(f" Saved best model (val acc: {val_acc:.3f})")
 
     scheduler.step(val_acc)
     current_lr = optimizer.param_groups[0]["lr"]
@@ -199,6 +208,12 @@ for epoch in range(EPOCHS):
         print(f" LR reduced to {current_lr:.2e}")
 
 print(f"\nDone. Best val accuracy: {best_val_acc:.3f}")
+
+final_path = MODEL_DIR / f"model_acc{best_val_acc:.3f}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
+
+torch.save(model.state_dict(), final_path)
+
+print(f"\n Saved FINAL model to: {final_path}")
 
 all_preds, all_true = [], []
 model.eval()
