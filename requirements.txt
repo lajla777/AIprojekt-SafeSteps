@@ -1,0 +1,8 @@
+numpy
+torch
+matplotlib
+scipy
+scikit-learn
+pytest
+ahrs
+pyserial
