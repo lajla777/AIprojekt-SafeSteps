@@ -4,7 +4,8 @@ model = YOLO("yolov8s.pt")
 
 model.train(
     data="data.yaml",
-    epochs=140,
+    epochs=120,
     imgsz=832,
-    batch=8
+    batch=8,
+    patience=25
 )
