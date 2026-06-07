@@ -1,8 +1,10 @@
 import base64
+import os
+import tempfile
 from nicegui import ui
 from camera import set_camera_enabled
 from config import config
-from image_utils import draw_detection_boxes, image_bytes_to_array, read_upload_event, results_to_detections
+from image_utils import draw_detection_boxes, read_upload_event, results_to_detections
 from src.models.image.predict import predict_source
 from state import add_log, state
 from tts import speak
@@ -77,7 +79,7 @@ def image_network_page() -> None:
 
         async def detect_uploaded_image(event) -> None:
             try:
-                image_bytes, _, mime_type = await read_upload_event(event)
+                image_bytes, suffix, mime_type = await read_upload_event(event)
 
                 state.uploaded_image_data_url = (
                     f'data:{mime_type};base64,' + base64.b64encode(image_bytes).decode('ascii')
@@ -85,27 +87,39 @@ def image_network_page() -> None:
                 uploaded_image.source = state.uploaded_image_data_url
                 upload_hint.visible = False
 
-                source = image_bytes_to_array(image_bytes)
-                results, names, state.uploaded_inference_ms = predict_source(
-                    source,
-                    conf=config.yolo_confidence,
-                )
+                temp_path = ''
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or '.jpg') as temp_file:
+                        temp_file.write(image_bytes)
+                        temp_path = temp_file.name
+
+                    results, names, state.uploaded_inference_ms = predict_source(
+                        temp_path,
+                        conf=config.yolo_confidence,
+                        model_path=config.yolo_model,
+                    )
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+
                 state.uploaded_detections = results_to_detections(results, names, config.yolo_confidence)
                 if state.uploaded_detections:
                     uploaded_image.source = draw_detection_boxes(image_bytes, state.uploaded_detections)
                 add_log(f'Uploaded image detected: {len(state.uploaded_detections)} objects', 'ok')
 
                 if state.uploaded_detections:
-                    labels = ', '.join(item.get('text', item['label']) for item in state.uploaded_detections[:3])
+                    labels = ', '.join(item.get('text', item['label']) for item in state.uploaded_detections)
                     speak(f'Na sliki zaznam: {labels}.')
                 else:
                     speak('Na sliki ni zaznanih objektov.')
 
                 render_uploaded_results()
+                upload.reset()
 
             except Exception as exc:
                 add_log(f'Uploaded image detection failed: {exc}', 'danger')
                 ui.notify(f'Zaznavanje slike ni uspelo: {exc}', type='negative')
+                upload.reset()
 
         upload.on_upload(detect_uploaded_image)
 

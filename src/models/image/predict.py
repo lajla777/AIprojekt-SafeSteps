@@ -2,27 +2,30 @@ from pathlib import Path
 import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-MODEL_PATH = PROJECT_ROOT / "runs" / "detect" / "train" / "weights" / "best.pt"
+MODEL_PATH = PROJECT_ROOT / "runs" / "detect" / "train-10" / "weights" / "best.pt"
 
 _model = None
+_model_path = None
 
 
-def get_model():
-    global _model
+def get_model(model_path: str | Path = MODEL_PATH):
+    global _model, _model_path
 
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Image model not found: {MODEL_PATH}")
+    model_path = Path(model_path)
+    if not model_path.exists():
+        raise FileNotFoundError(f"Image model not found: {model_path}")
 
-    if _model is None:
+    if _model is None or _model_path != model_path:
         from ultralytics import YOLO
 
-        _model = YOLO(str(MODEL_PATH))
+        _model = YOLO(str(model_path))
+        _model_path = model_path
 
     return _model
 
 
-def predict_source(source, conf: float = 0.30):
-    model = get_model()
+def predict_source(source, conf: float = 0.30, model_path: str | Path = MODEL_PATH):
+    model = get_model(model_path)
     start = time.perf_counter()
     
     results = model.predict(

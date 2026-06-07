@@ -6,6 +6,10 @@ import io
 IMAGE_LABEL_TEXT = {
     'person': 'oseba',
     'car': 'avtomobil',
+    'crosswalk': 'prehod za pešce',
+    'cyclist': 'kolesar',
+    'green traffic light': 'zelena luč na semaforju',
+    'red traffic light': 'rdeča luč na semaforju',
 }
 
 def image_label_text(label: str) -> str:
@@ -58,9 +62,9 @@ async def read_upload_event(event) -> tuple[bytes, str, str]:
 
 def image_bytes_to_array(image_bytes: bytes):
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageOps
 
-    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert('RGB')
     return np.array(image)
 
 
@@ -92,9 +96,9 @@ def draw_detection_boxes(image_bytes: bytes, detections: list[dict]) -> str:
     from state import add_log
 
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert('RGB')
         draw = ImageDraw.Draw(image)
         font = ImageFont.load_default()
 
@@ -108,7 +112,7 @@ def draw_detection_boxes(image_bytes: bytes, detections: list[dict]) -> str:
             color = palette[index % len(palette)]
             text = f"{item.get('text', item['label'])} {int(item['conf'] * 100)}%"
 
-            draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
+            draw.rectangle((x1, y1, x2, y2), outline=color, width=11)
             left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
             text_width = right - left
             text_height = bottom - top

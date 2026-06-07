@@ -41,7 +41,7 @@ def camera_loop() -> None:
 
         if model is None:
             try:
-                model = get_model()
+                model = get_model(config.yolo_model)
                 add_log(f'YOLO model loaded: {config.yolo_model}', 'ok')
             except Exception as exc:
                 add_log(f'YOLO load error: {exc}', 'danger')
@@ -69,6 +69,7 @@ def camera_loop() -> None:
         results, names, state.inference_ms = predict_source(
             frame,
             conf=config.yolo_confidence,
+            model_path=config.yolo_model,
         )
         state.detections = results_to_detections(results, names, config.yolo_confidence)
         time.sleep(0.1)

@@ -33,7 +33,7 @@ def _first_matching(directory: Path, patterns: list[str]) -> Path | None:
         return None
 
     for pattern in patterns:
-        matches = sorted(directory.glob(pattern))
+        matches = sorted(directory.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
         if matches:
             return matches[0]
     return None
@@ -55,11 +55,12 @@ IMAGE_MODEL_PATH = _model_path(
     'SAFESTEPS_IMAGE_MODEL',
     [
         MODEL_PATH,
+        PROJECT_ROOT / 'runs' / 'detect' / 'train-10' / 'weights' / 'best.pt',
         PROJECT_ROOT / 'runs' / 'detect' / 'train' / 'weights' / 'best.pt',
         PROJECT_ROOT / 'yolov8n.pt',
     ],
     PROJECT_ROOT / 'runs',
-    ['detect/train/weights/best.pt', '**/weights/best.pt', '**/*.pt'],
+    ['detect/train-10/weights/best.pt', 'detect/train-*/weights/best.pt', 'detect/train/weights/best.pt', '**/weights/best.pt', '**/*.pt'],
 )
 
 TOF_MODEL_PATH = _model_path(
@@ -83,10 +84,6 @@ TTS_MODEL_PATH = _model_path(
 
 @dataclass
 class Config:
-    stm32_host: str = '192.168.1.50'
-    stm32_port: int = 5000
-    stm_service_host: str = '127.0.0.1'
-    stm_service_port: int = 5000
     stm32_vid: str = '0483'
     stm32_pid: str = '5740'
     stm32_baudrate: int = 115200
