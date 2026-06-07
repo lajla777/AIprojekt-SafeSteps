@@ -10,11 +10,23 @@ from typing import Optional
 from config import config
 from state import add_log, state
 
-tts_queue: queue.Queue[str] = queue.Queue()
+TTS_MAX_QUEUE_AGE = 2.0
+TTS_LIVE_STALE_SEC = 2.5
+
+tts_queue: queue.Queue[tuple[float, str]] = queue.Queue()
 _last_requested_text = ''
 _last_requested_at = 0.0
 _piper_voice = None
 _piper_model_path: Path | None = None
+
+
+def clear_tts_queue() -> None:
+    """Odstrani cakajoca TTS sporocila, da govor ne zaostaja za stanjem."""
+    while True:
+        try:
+            tts_queue.get_nowait()
+        except queue.Empty:
+            return
 
 
 def speak(msg: str, min_interval: float = 0.0) -> None:
@@ -27,13 +39,20 @@ def speak(msg: str, min_interval: float = 0.0) -> None:
 
         _last_requested_text = msg
         _last_requested_at = now
-        tts_queue.put(msg)
+        clear_tts_queue()
+        tts_queue.put((now, msg))
 
 
 def tts_worker() -> None:
     while True:
-        msg = tts_queue.get()
+        requested_at, msg = tts_queue.get()
         if not msg or not config.tts_enabled:
+            continue
+        if time.time() - requested_at > TTS_MAX_QUEUE_AGE:
+            add_log(f'Skipping stale TTS: "{msg}"', 'info')
+            continue
+        if _is_live_warning_message(msg) and not _live_warning_is_current():
+            add_log(f'Skipping outdated ToF TTS: "{msg}"', 'info')
             continue
 
         state.tts_active = True
@@ -71,6 +90,10 @@ def speak_with_piper(msg: str) -> None:
     try:
         with wave.open(str(wav_path), 'wb') as wav_file:
             _synthesize_piper_chunks(voice, msg, wav_file)
+
+        if _is_live_warning_message(msg) and not _live_warning_is_current():
+            add_log(f'Skipping outdated ToF audio: "{msg}"', 'info')
+            return
 
         _play_wav(wav_path)
     finally:
@@ -119,6 +142,12 @@ def _play_wav(path: Path) -> None:
 def build_tts_message() -> Optional[str]:
     distance = state.tof_distance
 
+    if state.tof_search_enabled:
+        if not state.tof_last_seen or time.time() - state.tof_last_seen > TTS_LIVE_STALE_SEC:
+            return None
+        if state.tof_prediction == 'no_obstacle':
+            return None
+
     if distance < 0:
         return None
 
@@ -138,6 +167,20 @@ def build_tts_message() -> Optional[str]:
     return f'{urgency} Ovira, razdalja {dist_cm} centimetrov.'
 
 
+def _is_live_warning_message(msg: str) -> bool:
+    return msg.startswith('Nevarnost!') or msg.startswith('Pozor.')
+
+
+def _live_warning_is_current() -> bool:
+    if not state.tof_search_enabled:
+        return True
+    if not state.tof_last_seen or time.time() - state.tof_last_seen > TTS_LIVE_STALE_SEC:
+        return False
+    if state.tof_prediction == 'no_obstacle':
+        return False
+    return 0 <= state.tof_distance < config.warn_dist
+
+
 def tts_trigger_loop() -> None:
     while True:
         msg = build_tts_message()
@@ -149,5 +192,4 @@ def tts_trigger_loop() -> None:
                 state.last_tts_trigger = now
                 speak(msg)
                 add_log(f'TTS: "{msg}"', 'info')
-
         time.sleep(0.5)

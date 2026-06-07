@@ -37,8 +37,8 @@ def tof_prediction_loop() -> None:
 
                 angle_distance, tof_fvz = angle_distance_from_packets(packets)
                 distance_stats = _distance_stats(angle_distance)
-                if distance_stats['min_mm'] != float('inf'):
-                    state.tof_distance = distance_stats['min_mm'] / 1000.0
+                if distance_stats['near_count'] >= 3:
+                    state.tof_distance = distance_stats['near_median_mm'] / 1000.0
                 else:
                     state.tof_distance = -1.0
 
@@ -94,6 +94,8 @@ def tof_prediction_loop() -> None:
                     f'{result.get("window_count", 1)} oken, '
                     f'{tof_fvz:.1f} Hz, '
                     f'veljavne razdalje {distance_stats["valid_ratio"]:.0%}, '
+                    f'bliznje razdalje {distance_stats["close_ratio"]:.0%}, '
+                    f'opozorilne razdalje {distance_stats["near_ratio"]:.0%}, '
                     f'min {distance_stats["min_mm"]:.0f} mm, '
                     f'mediana {distance_stats["median_mm"]:.0f} mm, '
                     f'kot ovire {stable_result.get("obstacle_angle_deg", float("nan")):.0f} stopinj, '
@@ -106,6 +108,8 @@ def tof_prediction_loop() -> None:
                     f'({int(stable_result["confidence"] * 100)}%, raw {result["text"]}, '
                     f'{stable_result["vote_count"]}/{stable_result["history_count"]} glasov, '
                     f'veljavne razdalje {distance_stats["valid_ratio"]:.0%}, '
+                    f'bliznje {distance_stats["close_ratio"]:.0%}, '
+                    f'opozorilne {distance_stats["near_ratio"]:.0%}, '
                     f'{stable_result.get("min_distance_mm", 0):.0f} mm min, '
                     f'{stable_result.get("obstacle_angle_deg", float("nan")):.0f} deg)',
                     log_level,
@@ -178,12 +182,25 @@ def _distance_stats(angle_distance) -> dict:
     distances = np.asarray(angle_distance[:, 1], dtype=float)
     valid = np.isfinite(distances) & (distances > 0) & (distances < 4000)
     valid_values = distances[valid]
+    close = valid & (distances < config.tof_no_obstacle_distance_mm)
+    close_values = distances[close]
+    near_limit_mm = config.warn_dist * 1000
+    near = valid & (distances < near_limit_mm)
+    near_values = distances[near]
     return {
         'count': int(len(distances)),
         'valid_count': int(valid.sum()),
         'valid_ratio': float(valid.sum() / len(distances)) if len(distances) else 0.0,
+        'close_count': int(close.sum()),
+        'close_ratio': float(close.sum() / len(distances)) if len(distances) else 0.0,
+        'near_count': int(near.sum()),
+        'near_ratio': float(near.sum() / len(distances)) if len(distances) else 0.0,
         'min_mm': float(np.min(valid_values)) if len(valid_values) else float('inf'),
         'median_mm': float(np.median(valid_values)) if len(valid_values) else float('nan'),
+        'close_min_mm': float(np.min(close_values)) if len(close_values) else float('inf'),
+        'close_median_mm': float(np.median(close_values)) if len(close_values) else float('inf'),
+        'near_min_mm': float(np.min(near_values)) if len(near_values) else float('inf'),
+        'near_median_mm': float(np.median(near_values)) if len(near_values) else float('inf'),
     }
 
 
@@ -195,9 +212,12 @@ def _looks_like_no_obstacle(stats: dict) -> bool:
         return True
     if stats['valid_ratio'] < 0.10:
         return True
-    return stats['valid_ratio'] < config.tof_no_obstacle_valid_ratio and (
-        stats['min_mm'] > config.tof_no_obstacle_distance_mm
-        or stats['median_mm'] > 1200
+    if stats['near_count'] < 3:
+        return True
+    min_near_ratio = config.tof_no_obstacle_valid_ratio * 0.4
+    return stats['near_ratio'] < min_near_ratio and (
+        stats['near_min_mm'] > config.warn_dist * 1000
+        or stats['near_median_mm'] > config.warn_dist * 1000
     )
 
 
@@ -321,18 +341,25 @@ def _apply_distance_and_confidence_gate(result: dict, sweep_data) -> dict:
     distances = np.asarray(sweep_data[:, 1], dtype=float)
     distances = distances[np.isfinite(distances)]
     distances = distances[distances > 0]
+    close_distances = distances[distances < config.tof_no_obstacle_distance_mm]
+    near_distances = distances[distances < config.warn_dist * 1000]
 
     min_distance = float(np.nanmin(distances)) if len(distances) else float('inf')
     median_distance = float(np.nanmedian(distances)) if len(distances) else float('inf')
+    close_ratio = float(len(close_distances) / len(distances)) if len(distances) else 0.0
+    near_ratio = float(len(near_distances) / len(distances)) if len(distances) else 0.0
     gated['min_distance_mm'] = min_distance
     gated['median_distance_mm'] = median_distance
+    gated['close_ratio'] = close_ratio
+    gated['near_ratio'] = near_ratio
 
     is_obstacle = gated['label'] != 'no_obstacle'
     low_confidence = gated['confidence'] < config.tof_min_obstacle_confidence
-    sparse_distances = len(distances) < 4
-    no_close_distance = min_distance > config.tof_no_obstacle_distance_mm or median_distance > 1200
+    sparse_near_distances = len(near_distances) < 3
+    weak_near_ratio = near_ratio < config.tof_no_obstacle_valid_ratio * 0.4
+    no_near_distance = not len(near_distances) or float(np.nanmedian(near_distances)) > config.warn_dist * 1000
 
-    if is_obstacle and (sparse_distances or (low_confidence and no_close_distance)):
+    if is_obstacle and (sparse_near_distances or (low_confidence and (weak_near_ratio or no_near_distance))):
         gated['label'] = 'no_obstacle'
         gated['text'] = 'ni ovire'
         gated['confidence'] = max(gated['confidence'], 1.0 - gated['confidence'])
@@ -360,8 +387,10 @@ def _apply_geometry_fallback(result: dict, angle_distance) -> dict:
 
     model_is_uncertain = corrected['confidence'] < config.tof_min_obstacle_confidence
     model_says_no_obstacle = corrected['label'] == 'no_obstacle'
+    geometry_says_center = geometry['label'] == 'obstacle_center'
+    model_says_side = corrected['label'] in ('obstacle_left', 'obstacle_right', 'obstacle_right_left')
 
-    if model_is_uncertain or model_says_no_obstacle:
+    if model_is_uncertain or model_says_no_obstacle or (geometry_says_center and model_says_side):
         corrected['label'] = geometry['label']
         corrected['text'] = geometry['text']
         corrected['confidence'] = max(corrected['confidence'], geometry['confidence'])
@@ -383,9 +412,11 @@ def _geometry_prediction(angle_distance) -> dict | None:
     values = np.asarray(angle_distance, dtype=float)
     angles = values[:, 0]
     distances = values[:, 1]
-    valid = np.isfinite(distances) & (distances > 0) & (distances < config.tof_no_obstacle_distance_mm)
+    valid = np.isfinite(distances) & (distances > 0) & (distances < config.warn_dist * 1000)
 
-    if int(valid.sum()) < 3:
+    valid_count = int(valid.sum())
+    valid_ratio = float(valid_count / len(distances)) if len(distances) else 0.0
+    if valid_count < 3 or valid_ratio < config.tof_no_obstacle_valid_ratio * 0.4:
         return None
 
     close_angles = angles[valid]
@@ -393,7 +424,8 @@ def _geometry_prediction(angle_distance) -> dict | None:
     weights = 1.0 / np.maximum(close_distances, 1.0)
     obstacle_angle = float(np.average(close_angles, weights=weights))
 
-    if abs(obstacle_angle) <= config.tof_center_angle_deg:
+    center_angle_deg = max(config.tof_center_angle_deg, 15.0)
+    if abs(obstacle_angle) <= center_angle_deg:
         label = 'obstacle_center'
         text = 'ovira spredaj'
     elif obstacle_angle > 0:
