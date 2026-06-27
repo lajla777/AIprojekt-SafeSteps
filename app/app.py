@@ -35,4 +35,5 @@ if __name__ == '__main__':
         port=8080,
         reload=False,
         dark=False,
+        native=True,
     )

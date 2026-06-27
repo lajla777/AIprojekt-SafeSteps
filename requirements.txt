@@ -13,3 +13,4 @@ pillow
 pillow-heif
 pillow-avif-plugin
 piper-tts
+pywebview
