@@ -44,6 +44,7 @@ jobs:
             --paths src `
             --collect-all nicegui `
             --collect-all piper `
+            --collect-all ahrs `
             --hidden-import webview `
             --hidden-import cv2 `
             --hidden-import ultralytics `
@@ -67,6 +68,7 @@ jobs:
             --name SafeSteps-LabelTool `
             --paths . `
             --paths src `
+            --collect-all ahrs `
             --hidden-import tools.label_tool `
             --hidden-import tools.visualization `
             --hidden-import tools.orientation_viewer `
