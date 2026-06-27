@@ -3,15 +3,17 @@ import sys
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from decoder.decode import decode_file
 from tools.visualization import sestavi_podatke, v_pakete
-
 from collections import Counter
 
 from tools.label_tool import LabelTool
-
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
 
 LABELS_DIR = PROJECT_ROOT / "labels"
 

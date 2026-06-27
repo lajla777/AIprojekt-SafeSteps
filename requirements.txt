@@ -6,3 +6,10 @@ scikit-learn
 pytest
 ahrs
 pyserial
+nicegui
+ultralytics
+opencv-python-headless
+pillow
+pillow-heif
+pillow-avif-plugin
+piper-tts

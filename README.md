@@ -17,7 +17,7 @@ Naprava za pomoč slepim in slabovidnim pri premikanju v prostoru.
   
 ## Tehnologije
 - **Hardware**: STM32F411, ToF senzor, kamera
-- **Software & AI**: Python, nevronska mreža (ni še določena, verjetno YOLO)
+- **Software & AI**: Python, nevronska mreža (YOLO)
 
 ## Zagon 
 ```sh
