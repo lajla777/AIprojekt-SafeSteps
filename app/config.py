@@ -3,11 +3,25 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.models.image.predict import MODEL_PATH
+def _app_root() -> Path:
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def _bundle_root() -> Path:
+    if getattr(sys, 'frozen', False):
+        return Path(getattr(sys, '_MEIPASS', Path(sys.executable).resolve().parent))
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _app_root()
+BUNDLE_ROOT = _bundle_root()
+
+for path in (PROJECT_ROOT, BUNDLE_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 
 def _path_from_env(name: str) -> Path | None:
@@ -39,14 +53,15 @@ def _first_matching(directory: Path, patterns: list[str]) -> Path | None:
     return None
 
 
-def _model_path(env_name: str, candidates: list[Path], search_dir: Path, patterns: list[str]) -> str:
+def _model_path(env_name: str, candidates: list[Path], search_dirs: list[Path], patterns: list[str]) -> str:
     env_path = _path_from_env(env_name)
     if env_path is not None:
         return str(env_path)
 
-    found = _first_matching(search_dir, patterns)
-    if found is not None:
-        return str(found)
+    for search_dir in search_dirs:
+        found = _first_matching(search_dir, patterns)
+        if found is not None:
+            return str(found)
 
     return str(_first_existing(candidates))
 
@@ -54,30 +69,45 @@ def _model_path(env_name: str, candidates: list[Path], search_dir: Path, pattern
 IMAGE_MODEL_PATH = _model_path(
     'SAFESTEPS_IMAGE_MODEL',
     [
-        MODEL_PATH,
+        BUNDLE_ROOT / 'runs' / 'detect' / 'train-10' / 'weights' / 'best.pt',
         PROJECT_ROOT / 'runs' / 'detect' / 'train-10' / 'weights' / 'best.pt',
+        BUNDLE_ROOT / 'runs' / 'detect' / 'train' / 'weights' / 'best.pt',
         PROJECT_ROOT / 'runs' / 'detect' / 'train' / 'weights' / 'best.pt',
-        PROJECT_ROOT / 'yolov8n.pt',
+        BUNDLE_ROOT / 'src' / 'models' / 'image' / 'yolov8n.pt',
+        PROJECT_ROOT / 'src' / 'models' / 'image' / 'yolov8n.pt',
     ],
-    PROJECT_ROOT / 'runs',
+    [
+        BUNDLE_ROOT / 'runs',
+        PROJECT_ROOT / 'runs',
+        BUNDLE_ROOT / 'src' / 'models' / 'image',
+        PROJECT_ROOT / 'src' / 'models' / 'image',
+    ],
     ['detect/train-10/weights/best.pt', 'detect/train-*/weights/best.pt', 'detect/train/weights/best.pt', '**/weights/best.pt', '**/*.pt'],
 )
 
 TOF_MODEL_PATH = _model_path(
     'SAFESTEPS_TOF_MODEL',
     [
+        BUNDLE_ROOT / 'src' / 'models' / 'tof' / 'best_model.pth',
         PROJECT_ROOT / 'src' / 'models' / 'tof' / 'best_model.pth',
     ],
-    PROJECT_ROOT / 'src' / 'models' / 'tof',
+    [
+        BUNDLE_ROOT / 'src' / 'models' / 'tof',
+        PROJECT_ROOT / 'src' / 'models' / 'tof',
+    ],
     ['best_model.pth', '*.pth'],
 )
 
 TTS_MODEL_PATH = _model_path(
     'SAFESTEPS_TTS_MODEL',
     [
+        BUNDLE_ROOT / 'src' / 'models' / 'tts' / 'sl_SI-artur-medium.onnx',
         PROJECT_ROOT / 'src' / 'models' / 'tts' / 'sl_SI-artur-medium.onnx',
     ],
-    PROJECT_ROOT / 'src' / 'models' / 'tts',
+    [
+        BUNDLE_ROOT / 'src' / 'models' / 'tts',
+        PROJECT_ROOT / 'src' / 'models' / 'tts',
+    ],
     ['*.onnx'],
 )
 

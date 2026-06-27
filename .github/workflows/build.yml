@@ -1,0 +1,88 @@
+name: Build EXE
+
+on:
+  push:
+    branches:
+      - release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow pywebview lap
+
+      - name: Build icon
+        run: |
+          python -c "from PIL import Image; img=Image.open('app/assets/logo.png').convert('RGBA'); img.save('app/assets/SafeSteps.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
+      - name: Run tests
+        run: |
+          pytest
+
+      - name: Build app EXE
+        run: |
+          pyinstaller `
+            --clean `
+            --onefile `
+            --windowed `
+            --name SafeSteps `
+            --icon "app/assets/SafeSteps.ico" `
+            --paths . `
+            --paths app `
+            --paths src `
+            --collect-all nicegui `
+            --collect-all piper `
+            --collect-all ahrs `
+            --hidden-import webview `
+            --hidden-import cv2 `
+            --hidden-import ultralytics `
+            --hidden-import piper.voice `
+            --hidden-import models.tof.model `
+            --hidden-import src.models.image `
+            --hidden-import src.models.image.predict `
+            --hidden-import src.models.tof.model `
+            --add-data "app/assets;app/assets" `
+            --add-data "src/models/tts;src/models/tts" `
+            --add-data "src/models/tof/best_model.pth;src/models/tof" `
+            --add-data "src/models/image;src/models/image" `
+            --add-data "runs/detect/train-10/weights/best.pt;runs/detect/train-10/weights" `
+            app/app.py
+
+      - name: Build label tool EXE
+        run: |
+          pyinstaller `
+            --clean `
+            --onefile `
+            --name SafeSteps-LabelTool `
+            --paths . `
+            --paths src `
+            --collect-all ahrs `
+            --hidden-import tools.label_tool `
+            --hidden-import tools.visualization `
+            --hidden-import tools.orientation_viewer `
+            --hidden-import decoder.decode `
+            src/tools/label_app.py
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SafeSteps-exe
+          path: dist/SafeSteps.exe
+
+      - name: Upload label tool artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SafeSteps-LabelTool-exe
+          path: dist/SafeSteps-LabelTool.exe
